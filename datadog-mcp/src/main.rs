@@ -63,34 +63,167 @@ impl McpServer {
     fn register_tools() -> HashMap<String, ToolDefinition> {
         let mut tools = HashMap::new();
 
-        // Metrics & Monitoring
-        tools.insert(
-            "validate_api_key".to_string(),
-            ToolDefinition {
-                name: "validate_api_key".to_string(),
-                description: "Validate Datadog API credentials".to_string(),
-                input_schema: json!({"type": "object", "properties": {}, "required": []}),
-            },
-        );
+        // Metrics & Monitoring (9 tools)
+        tools.insert("validate_api_key".to_string(), ToolDefinition {
+            name: "validate_api_key".to_string(),
+            description: "Validate Datadog API credentials".to_string(),
+            input_schema: json!({"type": "object", "properties": {}, "required": []}),
+        });
+        tools.insert("get_metrics".to_string(), ToolDefinition {
+            name: "get_metrics".to_string(),
+            description: "Query Datadog metrics time series data".to_string(),
+            input_schema: json!({"type": "object", "properties": {"query": {"type": "string", "description": "Metric query"}, "from_timestamp": {"type": "integer", "description": "Start timestamp (Unix epoch)"}, "to_timestamp": {"type": "integer", "description": "End timestamp (Unix epoch)"}}, "required": ["query", "from_timestamp", "to_timestamp"]}),
+        });
+        tools.insert("search_metrics".to_string(), ToolDefinition {
+            name: "search_metrics".to_string(),
+            description: "Search for metrics by name pattern".to_string(),
+            input_schema: json!({"type": "object", "properties": {"query": {"type": "string", "description": "Search pattern for metric names"}}, "required": ["query"]}),
+        });
+        tools.insert("get_metric_metadata".to_string(), ToolDefinition {
+            name: "get_metric_metadata".to_string(),
+            description: "Get metadata for a specific metric".to_string(),
+            input_schema: json!({"type": "object", "properties": {"metric_name": {"type": "string", "description": "Name of the metric"}}, "required": ["metric_name"]}),
+        });
+        tools.insert("get_monitors".to_string(), ToolDefinition {
+            name: "get_monitors".to_string(),
+            description: "Get all Datadog monitors".to_string(),
+            input_schema: json!({"type": "object", "properties": {}, "required": []}),
+        });
+        tools.insert("get_monitor".to_string(), ToolDefinition {
+            name: "get_monitor".to_string(),
+            description: "Get specific monitor by ID".to_string(),
+            input_schema: json!({"type": "object", "properties": {"monitor_id": {"type": "integer", "description": "Monitor ID"}}, "required": ["monitor_id"]}),
+        });
+        tools.insert("create_monitor".to_string(), ToolDefinition {
+            name: "create_monitor".to_string(),
+            description: "Create a new Datadog monitor".to_string(),
+            input_schema: json!({"type": "object", "properties": {"name": {"type": "string", "description": "Monitor name"}, "type": {"type": "string", "description": "Monitor type"}, "query": {"type": "string", "description": "Monitor query"}, "message": {"type": "string"}, "options": {"type": "object"}}, "required": ["name", "type", "query"]}),
+        });
+        tools.insert("update_monitor".to_string(), ToolDefinition {
+            name: "update_monitor".to_string(),
+            description: "Update an existing Datadog monitor".to_string(),
+            input_schema: json!({"type": "object", "properties": {"monitor_id": {"type": "integer", "description": "Monitor ID"}, "name": {"type": "string"}, "query": {"type": "string"}, "message": {"type": "string"}, "options": {"type": "object"}}, "required": ["monitor_id"]}),
+        });
+        tools.insert("delete_monitor".to_string(), ToolDefinition {
+            name: "delete_monitor".to_string(),
+            description: "Delete a monitor".to_string(),
+            input_schema: json!({"type": "object", "properties": {"monitor_id": {"type": "integer", "description": "Monitor ID to delete"}}, "required": ["monitor_id"]}),
+        });
 
-        tools.insert(
-            "get_metrics".to_string(),
-            ToolDefinition {
-                name: "get_metrics".to_string(),
-                description: "Query Datadog metrics time series data".to_string(),
-                input_schema: json!({
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "description": "Metric query"},
-                        "from_timestamp": {"type": "integer", "description": "Start timestamp"},
-                        "to_timestamp": {"type": "integer", "description": "End timestamp"}
-                    },
-                    "required": ["query", "from_timestamp", "to_timestamp"]
-                }),
-            },
-        );
+        // Dashboards (5 tools)
+        tools.insert("get_dashboards".to_string(), ToolDefinition {
+            name: "get_dashboards".to_string(),
+            description: "Get all Datadog dashboards".to_string(),
+            input_schema: json!({"type": "object", "properties": {}, "required": []}),
+        });
+        tools.insert("get_dashboard".to_string(), ToolDefinition {
+            name: "get_dashboard".to_string(),
+            description: "Get specific dashboard by ID".to_string(),
+            input_schema: json!({"type": "object", "properties": {"dashboard_id": {"type": "string", "description": "Dashboard ID"}}, "required": ["dashboard_id"]}),
+        });
+        tools.insert("create_dashboard".to_string(), ToolDefinition {
+            name: "create_dashboard".to_string(),
+            description: "Create a new dashboard".to_string(),
+            input_schema: json!({"type": "object", "properties": {"title": {"type": "string"}, "layout_type": {"type": "string"}, "widgets": {"type": "array"}, "description": {"type": "string"}}, "required": ["title", "layout_type", "widgets"]}),
+        });
+        tools.insert("update_dashboard".to_string(), ToolDefinition {
+            name: "update_dashboard".to_string(),
+            description: "Update an existing dashboard".to_string(),
+            input_schema: json!({"type": "object", "properties": {"dashboard_id": {"type": "string"}, "title": {"type": "string"}, "widgets": {"type": "array"}}, "required": ["dashboard_id"]}),
+        });
+        tools.insert("delete_dashboard".to_string(), ToolDefinition {
+            name: "delete_dashboard".to_string(),
+            description: "Delete a dashboard".to_string(),
+            input_schema: json!({"type": "object", "properties": {"dashboard_id": {"type": "string"}}, "required": ["dashboard_id"]}),
+        });
 
-        // Add all 31 tools here (abbreviated for space)
+        // Logs & Events (2 tools)
+        tools.insert("search_logs".to_string(), ToolDefinition {
+            name: "search_logs".to_string(),
+            description: "Search Datadog logs".to_string(),
+            input_schema: json!({"type": "object", "properties": {"query": {"type": "string"}, "from_time": {"type": "string"}, "to_time": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["query", "from_time", "to_time"]}),
+        });
+        tools.insert("get_events".to_string(), ToolDefinition {
+            name: "get_events".to_string(),
+            description: "Get Datadog events".to_string(),
+            input_schema: json!({"type": "object", "properties": {"start": {"type": "integer"}, "end": {"type": "integer"}, "priority": {"type": "string"}, "sources": {"type": "string"}}, "required": ["start", "end"]}),
+        });
+
+        // Infrastructure & Tags (4 tools - note: get_service_map was disabled in Python)
+        tools.insert("get_infrastructure".to_string(), ToolDefinition {
+            name: "get_infrastructure".to_string(),
+            description: "Get infrastructure and hosts information".to_string(),
+            input_schema: json!({"type": "object", "properties": {}, "required": []}),
+        });
+        tools.insert("get_tags".to_string(), ToolDefinition {
+            name: "get_tags".to_string(),
+            description: "Get host tags".to_string(),
+            input_schema: json!({"type": "object", "properties": {"source": {"type": "string"}}, "required": []}),
+        });
+        tools.insert("get_downtimes".to_string(), ToolDefinition {
+            name: "get_downtimes".to_string(),
+            description: "Get scheduled downtimes".to_string(),
+            input_schema: json!({"type": "object", "properties": {}, "required": []}),
+        });
+        tools.insert("create_downtime".to_string(), ToolDefinition {
+            name: "create_downtime".to_string(),
+            description: "Create a scheduled downtime".to_string(),
+            input_schema: json!({"type": "object", "properties": {"scope": {"type": "array", "items": {"type": "string"}}, "start": {"type": "integer"}, "end": {"type": "integer"}, "message": {"type": "string"}}, "required": ["scope"]}),
+        });
+
+        // Testing (1 tool - note: get_rum_applications was disabled in Python)
+        tools.insert("get_synthetics_tests".to_string(), ToolDefinition {
+            name: "get_synthetics_tests".to_string(),
+            description: "Get all Synthetics tests".to_string(),
+            input_schema: json!({"type": "object", "properties": {}, "required": []}),
+        });
+
+        // Security & Incidents (4 tools)
+        tools.insert("get_security_rules".to_string(), ToolDefinition {
+            name: "get_security_rules".to_string(),
+            description: "Get security monitoring rules".to_string(),
+            input_schema: json!({"type": "object", "properties": {}, "required": []}),
+        });
+        tools.insert("get_incidents".to_string(), ToolDefinition {
+            name: "get_incidents".to_string(),
+            description: "Get incidents with pagination support".to_string(),
+            input_schema: json!({"type": "object", "properties": {"page_size": {"type": "integer"}}, "required": []}),
+        });
+        tools.insert("get_slos".to_string(), ToolDefinition {
+            name: "get_slos".to_string(),
+            description: "Get Service Level Objectives".to_string(),
+            input_schema: json!({"type": "object", "properties": {}, "required": []}),
+        });
+        tools.insert("get_notebooks".to_string(), ToolDefinition {
+            name: "get_notebooks".to_string(),
+            description: "Get Datadog notebooks".to_string(),
+            input_schema: json!({"type": "object", "properties": {}, "required": []}),
+        });
+
+        // Teams & Users (2 tools)
+        tools.insert("get_teams".to_string(), ToolDefinition {
+            name: "get_teams".to_string(),
+            description: "Get teams".to_string(),
+            input_schema: json!({"type": "object", "properties": {}, "required": []}),
+        });
+        tools.insert("get_users".to_string(), ToolDefinition {
+            name: "get_users".to_string(),
+            description: "Get users".to_string(),
+            input_schema: json!({"type": "object", "properties": {}, "required": []}),
+        });
+
+        // Utilities (2 tools)
+        tools.insert("analyze_data".to_string(), ToolDefinition {
+            name: "analyze_data".to_string(),
+            description: "Analyze stored Datadog data (summary, stats, or trends)".to_string(),
+            input_schema: json!({"type": "object", "properties": {"filepath": {"type": "string"}, "analysis_type": {"type": "string", "enum": ["summary", "stats", "trends"]}}, "required": ["filepath"]}),
+        });
+        tools.insert("cleanup_cache".to_string(), ToolDefinition {
+            name: "cleanup_cache".to_string(),
+            description: "Clean up old cache files".to_string(),
+            input_schema: json!({"type": "object", "properties": {"older_than_hours": {"type": "integer"}}, "required": []}),
+        });
+
         tools
     }
 

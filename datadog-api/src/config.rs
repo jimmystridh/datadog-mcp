@@ -31,13 +31,13 @@ impl DatadogConfig {
     }
 
     pub fn from_env() -> crate::Result<Self> {
-        let api_key = std::env::var("DATADOG_API_KEY")
-            .map_err(|_| crate::Error::ConfigError("DATADOG_API_KEY not set".to_string()))?;
+        let api_key = std::env::var("DD_API_KEY")
+            .map_err(|_| crate::Error::ConfigError("DD_API_KEY not set".to_string()))?;
 
-        let app_key = std::env::var("DATADOG_APP_KEY")
-            .map_err(|_| crate::Error::ConfigError("DATADOG_APP_KEY not set".to_string()))?;
+        let app_key = std::env::var("DD_APP_KEY")
+            .map_err(|_| crate::Error::ConfigError("DD_APP_KEY not set".to_string()))?;
 
-        let site = std::env::var("DATADOG_SITE").unwrap_or_else(|_| default_site());
+        let site = std::env::var("DD_SITE").unwrap_or_else(|_| default_site());
 
         Ok(Self {
             api_key,

@@ -61,9 +61,9 @@ cp .env.example .env
 Edit `.env` and add your Datadog credentials:
 
 ```env
-DATADOG_API_KEY=your_api_key_here
-DATADOG_APP_KEY=your_app_key_here
-DATADOG_SITE=datadoghq.com  # or datadoghq.eu, us3.datadoghq.com, etc.
+DD_API_KEY=your_api_key_here
+DD_APP_KEY=your_app_key_here
+DD_SITE=datadoghq.com  # or datadoghq.eu, us3.datadoghq.com, etc.
 ```
 
 ### 3. Build the project
@@ -96,9 +96,9 @@ Add to your Claude Desktop configuration (`~/Library/Application Support/Claude/
     "datadog": {
       "command": "/path/to/datadog-mcp/target/release/datadog-mcp",
       "env": {
-        "DATADOG_API_KEY": "your_api_key",
-        "DATADOG_APP_KEY": "your_app_key",
-        "DATADOG_SITE": "datadoghq.com"
+        "DD_API_KEY": "your_api_key",
+        "DD_APP_KEY": "your_app_key",
+        "DD_SITE": "datadoghq.com"
       }
     }
   }
@@ -116,9 +116,9 @@ Add to your Continue configuration:
       "name": "datadog",
       "command": "/path/to/datadog-mcp/target/release/datadog-mcp",
       "env": {
-        "DATADOG_API_KEY": "your_api_key",
-        "DATADOG_APP_KEY": "your_app_key",
-        "DATADOG_SITE": "datadoghq.com"
+        "DD_API_KEY": "your_api_key",
+        "DD_APP_KEY": "your_app_key",
+        "DD_SITE": "datadoghq.com"
       }
     }
   ]
@@ -296,9 +296,9 @@ Example error response:
 
 ### Environment Variables
 
-- `DATADOG_API_KEY` (required) - API authentication credential
-- `DATADOG_APP_KEY` (required) - Application-level authentication credential
-- `DATADOG_SITE` (optional) - Regional endpoint (defaults to "datadoghq.com")
+- `DD_API_KEY` (required) - API authentication credential
+- `DD_APP_KEY` (required) - Application-level authentication credential
+- `DD_SITE` (optional) - Regional endpoint (defaults to "datadoghq.com")
   - US1: `datadoghq.com` (default)
   - US3: `us3.datadoghq.com`
   - US5: `us5.datadoghq.com`
@@ -318,7 +318,7 @@ Set the `RUST_LOG` environment variable to control log verbosity:
 
 ## Troubleshooting
 
-### "DATADOG_API_KEY not set" error
+### "DD_API_KEY not set" error
 
 Make sure you have created a `.env` file with your credentials or set the environment variables.
 

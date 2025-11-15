@@ -4,6 +4,9 @@ use serde::de::DeserializeOwned;
 use std::time::Duration;
 use tracing::{debug, error, trace};
 
+/// HTTP client for interacting with the Datadog API.
+///
+/// Handles authentication, request building, and response parsing for all Datadog API endpoints.
 #[derive(Clone)]
 pub struct DatadogClient {
     client: Client,
@@ -11,8 +14,12 @@ pub struct DatadogClient {
 }
 
 impl DatadogClient {
+    /// Creates a new Datadog API client with the given configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the HTTP client cannot be built.
     pub fn new(config: DatadogConfig) -> Result<Self> {
-        // Build HTTP client
         let client = Client::builder()
             .timeout(Duration::from_secs(30))
             .pool_max_idle_per_host(10)
@@ -22,6 +29,8 @@ impl DatadogClient {
         Ok(Self { client, config })
     }
 
+    /// Returns a reference to the configuration used by this client.
+    #[must_use]
     pub fn config(&self) -> &DatadogConfig {
         &self.config
     }
@@ -32,13 +41,13 @@ impl DatadogClient {
         headers.insert(
             "DD-API-KEY",
             header::HeaderValue::from_str(&self.config.api_key)
-                .map_err(|e| Error::ConfigError(format!("Invalid API key: {}", e)))?,
+                .map_err(|e| Error::ConfigError(format!("Invalid API key: {e}")))?,
         );
 
         headers.insert(
             "DD-APPLICATION-KEY",
             header::HeaderValue::from_str(&self.config.app_key)
-                .map_err(|e| Error::ConfigError(format!("Invalid app key: {}", e)))?,
+                .map_err(|e| Error::ConfigError(format!("Invalid app key: {e}")))?,
         );
 
         headers.insert(
@@ -57,7 +66,7 @@ impl DatadogClient {
         let status = response.status();
 
         if status.is_success() {
-            trace!("Successful response with status: {}", status);
+            trace!("Successful response with status: {status}");
             response.json::<T>().await.map_err(Error::HttpError)
         } else {
             let status_code = status.as_u16();
@@ -66,7 +75,7 @@ impl DatadogClient {
                 .await
                 .unwrap_or_else(|_| "Failed to read error body".to_string());
 
-            error!("API error: {} - {}", status_code, error_body);
+            error!("API error: {status_code} - {error_body}");
 
             Err(Error::ApiError {
                 status: status_code,
@@ -77,7 +86,7 @@ impl DatadogClient {
 
     pub async fn get<T: DeserializeOwned>(&self, endpoint: &str) -> Result<T> {
         let url = format!("{}{}", self.config.base_url(), endpoint);
-        debug!("GET {}", url);
+        debug!("GET {url}");
 
         let request = self.client.get(&url);
         let request = self.add_auth_headers(request)?;
@@ -92,7 +101,7 @@ impl DatadogClient {
         query: &Q,
     ) -> Result<T> {
         let url = format!("{}{}", self.config.base_url(), endpoint);
-        debug!("GET {} with query params", url);
+        debug!("GET {url} with query params");
 
         let request = self.client.get(&url).query(query);
         let request = self.add_auth_headers(request)?;
@@ -107,7 +116,7 @@ impl DatadogClient {
         body: &B,
     ) -> Result<T> {
         let url = format!("{}{}", self.config.base_url(), endpoint);
-        debug!("POST {}", url);
+        debug!("POST {url}");
 
         let request = self.client.post(&url).json(body);
         let request = self.add_auth_headers(request)?;
@@ -122,7 +131,7 @@ impl DatadogClient {
         body: &B,
     ) -> Result<T> {
         let url = format!("{}{}", self.config.base_url(), endpoint);
-        debug!("PUT {}", url);
+        debug!("PUT {url}");
 
         let request = self.client.put(&url).json(body);
         let request = self.add_auth_headers(request)?;
@@ -133,7 +142,7 @@ impl DatadogClient {
 
     pub async fn delete(&self, endpoint: &str) -> Result<()> {
         let url = format!("{}{}", self.config.base_url(), endpoint);
-        debug!("DELETE {}", url);
+        debug!("DELETE {url}");
 
         let request = self.client.delete(&url);
         let request = self.add_auth_headers(request)?;
@@ -161,7 +170,7 @@ impl DatadogClient {
 
     pub async fn delete_with_response<T: DeserializeOwned>(&self, endpoint: &str) -> Result<T> {
         let url = format!("{}{}", self.config.base_url(), endpoint);
-        debug!("DELETE {}", url);
+        debug!("DELETE {url}");
 
         let request = self.client.delete(&url);
         let request = self.add_auth_headers(request)?;

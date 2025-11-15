@@ -1,47 +1,81 @@
 use serde::{Deserialize, Serialize};
 
+/// Datadog API configuration containing credentials and regional settings.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DatadogConfig {
+    /// Datadog API key for authentication
     pub api_key: String,
+    /// Datadog application key for authentication
     pub app_key: String,
+    /// Datadog site/region (defaults to datadoghq.com)
     #[serde(default = "default_site")]
     pub site: String,
 }
 
+const fn default_site_const() -> &'static str {
+    "datadoghq.com"
+}
+
 fn default_site() -> String {
-    "datadoghq.com".to_string()
+    default_site_const().to_string()
 }
 
 impl DatadogConfig {
-    pub fn new(api_key: String, app_key: String) -> Self {
+    /// Creates a new Datadog configuration with the specified credentials.
+    ///
+    /// Uses the default site (datadoghq.com / US1 region).
+    #[must_use]
+    pub fn new(api_key: String, application_key: String) -> Self {
         Self {
             api_key,
-            app_key,
+            app_key: application_key,
             site: default_site(),
         }
     }
 
+    /// Sets the Datadog site/region for this configuration.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let config = DatadogConfig::new(api_key, app_key)
+    ///     .with_site("datadoghq.eu".to_string());
+    /// ```
+    #[must_use]
     pub fn with_site(mut self, site: String) -> Self {
         self.site = site;
         self
     }
 
+    /// Returns the full API base URL for the configured Datadog site.
+    #[must_use]
     pub fn base_url(&self) -> String {
         format!("https://api.{}", self.site)
     }
 
+    /// Creates a configuration from environment variables.
+    ///
+    /// # Environment Variables
+    ///
+    /// - `DD_API_KEY` (required): Datadog API key
+    /// - `DD_APP_KEY` (required): Datadog application key
+    /// - `DD_SITE` (optional): Datadog site, defaults to datadoghq.com
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if required environment variables are not set.
     pub fn from_env() -> crate::Result<Self> {
         let api_key = std::env::var("DD_API_KEY")
             .map_err(|_| crate::Error::ConfigError("DD_API_KEY not set".to_string()))?;
 
-        let app_key = std::env::var("DD_APP_KEY")
+        let application_key = std::env::var("DD_APP_KEY")
             .map_err(|_| crate::Error::ConfigError("DD_APP_KEY not set".to_string()))?;
 
         let site = std::env::var("DD_SITE").unwrap_or_else(|_| default_site());
 
         Ok(Self {
             api_key,
-            app_key,
+            app_key: application_key,
             site,
         })
     }

@@ -1,46 +1,11 @@
-use crate::cache::{cleanup_cache, load_data, store_data};
+use crate::cache::store_data;
 use datadog_api::{
-    apis::*, models::*, DatadogClient, DatadogConfig,
+    apis::*, models::*, DatadogClient,
 };
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{error, info};
-
-pub struct ToolContext {
-    pub client: Arc<DatadogClient>,
-}
-
-impl ToolContext {
-    pub fn new(client: DatadogClient) -> Self {
-        Self {
-            client: Arc::new(client),
-        }
-    }
-}
-
-// Helper macros for consistent error handling and responses
-macro_rules! tool_result {
-    ($result:expr, $prefix:expr, $success_msg:expr) => {
-        match $result {
-            Ok(data) => {
-                let filepath = store_data(&data, $prefix).await?;
-                info!($success_msg);
-                Ok(json!({
-                    "filepath": filepath,
-                    "status": "success",
-                }))
-            }
-            Err(e) => {
-                error!("Tool failed: {}", e);
-                Ok(json!({
-                    "error": format!("Operation failed: {}", e),
-                    "status": "error",
-                }))
-            }
-        }
-    };
-}
 
 // ============================================================================
 // METRICS & MONITORING TOOLS

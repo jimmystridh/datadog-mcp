@@ -1,5 +1,5 @@
 use crate::{config::DatadogConfig, error::Error, Result};
-use reqwest::{header, Client, RequestBuilder, Response, StatusCode};
+use reqwest::{header, Client, RequestBuilder, Response};
 use serde::de::DeserializeOwned;
 use std::time::Duration;
 use tracing::{debug, error, trace};

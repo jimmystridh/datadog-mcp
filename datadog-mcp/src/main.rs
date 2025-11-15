@@ -1,4 +1,4 @@
-mod cache;
+pub mod cache;
 mod mcp;
 mod tools;
 mod tools_part2;

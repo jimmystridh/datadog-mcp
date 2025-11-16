@@ -4,12 +4,15 @@ use crate::{
     Result,
 };
 
+/// API client for Datadog dashboards endpoints.
 pub struct DashboardsApi {
     client: DatadogClient,
 }
 
 impl DashboardsApi {
-    pub fn new(client: DatadogClient) -> Self {
+    /// Creates a new dashboards API client.
+    #[must_use]
+    pub const fn new(client: DatadogClient) -> Self {
         Self { client }
     }
 

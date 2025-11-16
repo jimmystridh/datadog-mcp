@@ -1,12 +1,15 @@
 use crate::{client::DatadogClient, models::IncidentsResponse, Result};
 use serde::Serialize;
 
+/// API client for Datadog incidents endpoints.
 pub struct IncidentsApi {
     client: DatadogClient,
 }
 
 impl IncidentsApi {
-    pub fn new(client: DatadogClient) -> Self {
+    /// Creates a new API client.
+    #[must_use]
+    pub const fn new(client: DatadogClient) -> Self {
         Self { client }
     }
 

@@ -5,12 +5,15 @@ use crate::{
 };
 use serde::Serialize;
 
+/// API client for Datadog infrastructure endpoints.
 pub struct InfrastructureApi {
     client: DatadogClient,
 }
 
 impl InfrastructureApi {
-    pub fn new(client: DatadogClient) -> Self {
+    /// Creates a new API client.
+    #[must_use]
+    pub const fn new(client: DatadogClient) -> Self {
         Self { client }
     }
 

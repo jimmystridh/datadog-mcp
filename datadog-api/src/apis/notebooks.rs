@@ -1,11 +1,14 @@
 use crate::{client::DatadogClient, models::NotebooksResponse, Result};
 
+/// API client for Datadog notebooks endpoints.
 pub struct NotebooksApi {
     client: DatadogClient,
 }
 
 impl NotebooksApi {
-    pub fn new(client: DatadogClient) -> Self {
+    /// Creates a new API client.
+    #[must_use]
+    pub const fn new(client: DatadogClient) -> Self {
         Self { client }
     }
 

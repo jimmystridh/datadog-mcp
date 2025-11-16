@@ -1,11 +1,14 @@
 use crate::{client::DatadogClient, models::SLOsResponse, Result};
 
+/// API client for Datadog slos endpoints.
 pub struct SLOsApi {
     client: DatadogClient,
 }
 
 impl SLOsApi {
-    pub fn new(client: DatadogClient) -> Self {
+    /// Creates a new API client.
+    #[must_use]
+    pub const fn new(client: DatadogClient) -> Self {
         Self { client }
     }
 

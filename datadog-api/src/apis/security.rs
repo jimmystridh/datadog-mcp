@@ -1,11 +1,14 @@
 use crate::{client::DatadogClient, models::SecurityRulesResponse, Result};
 
+/// API client for Datadog security endpoints.
 pub struct SecurityApi {
     client: DatadogClient,
 }
 
 impl SecurityApi {
-    pub fn new(client: DatadogClient) -> Self {
+    /// Creates a new API client.
+    #[must_use]
+    pub const fn new(client: DatadogClient) -> Self {
         Self { client }
     }
 

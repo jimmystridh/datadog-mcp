@@ -12,6 +12,7 @@ pub mod slos;
 pub mod notebooks;
 pub mod teams;
 pub mod users;
+pub mod traces;
 
 pub use metrics::MetricsApi;
 pub use monitors::MonitorsApi;
@@ -27,3 +28,4 @@ pub use slos::SLOsApi;
 pub use notebooks::NotebooksApi;
 pub use teams::TeamsApi;
 pub use users::UsersApi;
+pub use traces::TracesApi;

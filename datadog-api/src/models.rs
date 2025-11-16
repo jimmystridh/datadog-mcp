@@ -390,3 +390,151 @@ pub struct User {
     pub handle: Option<String>,
     pub verified: Option<bool>,
 }
+
+// APM/Traces
+/// A single span in a distributed trace
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Span {
+    /// Span ID (unique identifier for this span)
+    pub span_id: u64,
+    /// Trace ID (shared across all spans in the trace)
+    pub trace_id: u64,
+    /// Parent span ID (0 if root span)
+    #[serde(default)]
+    pub parent_id: u64,
+    /// Service name
+    pub service: String,
+    /// Resource name (e.g., endpoint, SQL query)
+    pub resource: String,
+    /// Operation name (e.g., "web.request", "db.query")
+    pub name: String,
+    /// Start timestamp (nanoseconds since epoch)
+    pub start: i64,
+    /// Duration in nanoseconds
+    pub duration: i64,
+    /// Error flag (0 = no error, 1 = error)
+    #[serde(default)]
+    pub error: i32,
+    /// Key-value metadata
+    #[serde(default)]
+    pub meta: HashMap<String, String>,
+    /// Numeric metadata
+    #[serde(default)]
+    pub metrics: HashMap<String, f64>,
+    /// Span type (web, db, cache, etc.)
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub span_type: Option<String>,
+}
+
+/// Request to submit traces
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TraceSubmitRequest {
+    /// Array of traces (each trace is an array of spans)
+    pub traces: Vec<Vec<Span>>,
+}
+
+/// Response from trace submission
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TraceSubmitResponse {
+    /// Status message
+    pub status: Option<String>,
+}
+
+/// Query parameters for searching traces
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TraceQuery {
+    /// Service name filter
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service: Option<String>,
+    /// Operation name filter
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation: Option<String>,
+    /// Resource filter
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resource: Option<String>,
+    /// Start time (seconds since epoch)
+    pub start: i64,
+    /// End time (seconds since epoch)
+    pub end: i64,
+    /// Maximum number of results
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<i32>,
+}
+
+/// A single trace (collection of spans)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Trace {
+    /// Trace ID
+    pub trace_id: String,
+    /// All spans in this trace
+    pub spans: Vec<Span>,
+    /// Start time
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start: Option<i64>,
+    /// End time
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end: Option<i64>,
+}
+
+/// Response from trace search
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TraceSearchResponse {
+    /// Matching traces
+    pub data: Option<Vec<Trace>>,
+    /// Metadata about the search
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub meta: Option<HashMap<String, JsonValue>>,
+}
+
+/// Service performance statistics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServiceStats {
+    /// Service name
+    pub service: String,
+    /// Statistics by endpoint/resource
+    pub stats: Vec<ResourceStats>,
+}
+
+/// Statistics for a specific resource
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResourceStats {
+    /// Resource name
+    pub resource: String,
+    /// Request count
+    pub hits: i64,
+    /// Error count
+    pub errors: i64,
+    /// Average duration (nanoseconds)
+    pub duration: f64,
+    /// P50 latency
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub p50: Option<f64>,
+    /// P95 latency
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub p95: Option<f64>,
+    /// P99 latency
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub p99: Option<f64>,
+}
+
+/// Service dependencies
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServiceDependencies {
+    /// Service name
+    pub service: String,
+    /// Calls made to other services
+    pub calls: Vec<ServiceCall>,
+}
+
+/// A call from one service to another
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServiceCall {
+    /// Target service name
+    pub service: String,
+    /// Call count
+    pub count: i64,
+    /// Average duration
+    pub avg_duration: f64,
+    /// Error rate
+    pub error_rate: f64,
+}

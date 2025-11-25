@@ -294,7 +294,7 @@ pub struct SyntheticsTestRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[serde(rename_all = "camelCase")]
 pub enum SyntheticsAssertionType {
     StatusCode,
     ResponseTime,

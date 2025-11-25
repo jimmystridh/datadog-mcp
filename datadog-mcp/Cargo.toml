@@ -12,6 +12,9 @@ path = "src/main.rs"
 [dependencies]
 datadog-api = { path = "../datadog-api" }
 
+# MCP Server SDK
+rmcp = { git = "https://github.com/modelcontextprotocol/rust-sdk.git", rev = "8a577659f01917289064c0a3c753392b44305ef4", features = ["server", "transport-io"] }
+
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 serde = { workspace = true }
@@ -24,3 +27,6 @@ dotenv = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 async-trait = { workspace = true }
+
+# JSON Schema generation for tool input schemas
+schemars = { version = "0.8", features = ["derive"] }

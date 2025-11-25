@@ -1,5 +1,29 @@
 use serde::{Deserialize, Serialize};
 
+/// Retry configuration for API requests.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RetryConfig {
+    /// Maximum number of retry attempts
+    pub max_retries: u32,
+    /// Initial backoff duration in milliseconds
+    pub initial_backoff_ms: u64,
+    /// Maximum backoff duration in milliseconds
+    pub max_backoff_ms: u64,
+    /// Backoff multiplier for exponential backoff
+    pub backoff_multiplier: f64,
+}
+
+impl Default for RetryConfig {
+    fn default() -> Self {
+        Self {
+            max_retries: 3,
+            initial_backoff_ms: 100,
+            max_backoff_ms: 10000,
+            backoff_multiplier: 2.0,
+        }
+    }
+}
+
 /// Datadog API configuration containing credentials and regional settings.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DatadogConfig {
@@ -10,6 +34,12 @@ pub struct DatadogConfig {
     /// Datadog site/region (defaults to datadoghq.com)
     #[serde(default = "default_site")]
     pub site: String,
+    /// Retry configuration
+    #[serde(default)]
+    pub retry_config: RetryConfig,
+    /// List of unstable operations that require the DD-OPERATION-UNSTABLE header
+    #[serde(default = "default_unstable_operations")]
+    pub unstable_operations: Vec<String>,
 }
 
 const fn default_site_const() -> &'static str {
@@ -18,6 +48,12 @@ const fn default_site_const() -> &'static str {
 
 fn default_site() -> String {
     default_site_const().to_string()
+}
+
+fn default_unstable_operations() -> Vec<String> {
+    vec![
+        "incidents".to_string(),
+    ]
 }
 
 impl DatadogConfig {
@@ -30,6 +66,8 @@ impl DatadogConfig {
             api_key,
             app_key: application_key,
             site: default_site(),
+            retry_config: RetryConfig::default(),
+            unstable_operations: default_unstable_operations(),
         }
     }
 
@@ -77,6 +115,8 @@ impl DatadogConfig {
             api_key,
             app_key: application_key,
             site,
+            retry_config: RetryConfig::default(),
+            unstable_operations: default_unstable_operations(),
         })
     }
 }

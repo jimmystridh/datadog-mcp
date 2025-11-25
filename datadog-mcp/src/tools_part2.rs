@@ -1,8 +1,5 @@
 use crate::cache::{cleanup_cache, load_data, store_data};
-use datadog_api::{
-    apis::*, models::*,
-    DatadogClient,
-};
+use datadog_api::{apis::*, models::*, DatadogClient};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -72,12 +69,7 @@ pub async fn get_events(
 
     let api = EventsApi::new((*ctx).clone());
     let result = api
-        .list_events(
-            start,
-            end,
-            priority.as_deref(),
-            sources.as_deref(),
-        )
+        .list_events(start, end, priority.as_deref(), sources.as_deref())
         .await;
 
     match result {
@@ -244,6 +236,31 @@ pub async fn create_downtime(
     }
 }
 
+pub async fn cancel_downtime(ctx: Arc<DatadogClient>, downtime_id: i64) -> anyhow::Result<Value> {
+    info!("Cancelling downtime ID: {}", downtime_id);
+
+    let api = DowntimesApi::new((*ctx).clone());
+    let result = api.cancel_downtime(downtime_id).await;
+
+    match result {
+        Ok(()) => {
+            info!("Cancelled downtime ID: {}", downtime_id);
+            Ok(json!({
+                "summary": format!("Cancelled downtime ID: {}", downtime_id),
+                "downtime_id": downtime_id,
+                "status": "cancelled"
+            }))
+        }
+        Err(e) => {
+            error!("Failed to cancel downtime: {}", e);
+            Ok(json!({
+                "error": format!("Failed to cancel downtime: {}", e),
+                "status": "error",
+            }))
+        }
+    }
+}
+
 // ============================================================================
 // TESTING & APPLICATIONS TOOLS
 // ============================================================================
@@ -280,6 +297,297 @@ pub async fn get_synthetics_tests(ctx: Arc<DatadogClient>) -> anyhow::Result<Val
             error!("Failed to get Synthetics tests: {}", e);
             Ok(json!({
                 "error": format!("Failed to get Synthetics tests: {}", e),
+                "status": "error",
+            }))
+        }
+    }
+}
+
+pub async fn get_synthetics_locations(ctx: Arc<DatadogClient>) -> anyhow::Result<Value> {
+    info!("Getting Synthetics locations");
+
+    let api = SyntheticsApi::new((*ctx).clone());
+    let result = api.list_locations().await;
+
+    match result {
+        Ok(data) => {
+            let public_locs: Vec<_> = data
+                .locations
+                .iter()
+                .filter(|loc| !loc.is_private.unwrap_or(false))
+                .collect();
+            let private_locs: Vec<_> = data
+                .locations
+                .iter()
+                .filter(|loc| loc.is_private.unwrap_or(false))
+                .collect();
+
+            let mut regions: HashMap<String, Vec<String>> = HashMap::new();
+            for loc in &public_locs {
+                let region_name = loc
+                    .region
+                    .as_ref()
+                    .map(|r| r.name.clone())
+                    .unwrap_or_else(|| "Unknown".to_string());
+                regions
+                    .entry(region_name)
+                    .or_default()
+                    .push(loc.id.clone());
+            }
+
+            let eu_locations: Vec<String> = public_locs
+                .iter()
+                .filter(|loc| loc.id.to_lowercase().contains("eu"))
+                .map(|loc| loc.id.clone())
+                .collect();
+
+            let filepath = store_data(&data, "synthetics_locations").await?;
+
+            Ok(json!({
+                "filepath": filepath,
+                "summary": format!(
+                    "Retrieved {} Synthetics locations ({} public, {} private)",
+                    data.locations.len(),
+                    public_locs.len(),
+                    private_locs.len()
+                ),
+                "total_locations": data.locations.len(),
+                "public_count": public_locs.len(),
+                "private_count": private_locs.len(),
+                "regions": regions,
+                "eu_locations": eu_locations,
+                "status": "success",
+            }))
+        }
+        Err(e) => {
+            error!("Failed to get Synthetics locations: {}", e);
+            Ok(json!({
+                "error": format!("Failed to get Synthetics locations: {}", e),
+                "status": "error",
+            }))
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn create_synthetics_test(
+    ctx: Arc<DatadogClient>,
+    name: String,
+    test_type: String,
+    url: String,
+    locations: Vec<String>,
+    message: Option<String>,
+    tags: Option<Vec<String>>,
+    tick_every: Option<i32>,
+) -> anyhow::Result<Value> {
+    use datadog_api::models::*;
+
+    info!("Creating Synthetics test: {}", name);
+
+    // Validate test_type
+    if test_type != "api" {
+        return Ok(json!({
+            "error": "Only 'api' test type is currently supported",
+            "status": "error",
+        }));
+    }
+
+    // Build test request
+    let request = SyntheticsTestCreateRequest {
+        name: name.clone(),
+        test_type: SyntheticsTestType::Api,
+        subtype: SyntheticsTestSubtype::Http,
+        config: SyntheticsTestConfig {
+            request: SyntheticsTestRequest {
+                method: "GET".to_string(),
+                url: url.clone(),
+                timeout: Some(30.0),
+                headers: None,
+                body: None,
+            },
+            assertions: vec![
+                SyntheticsAssertion {
+                    assertion_type: SyntheticsAssertionType::StatusCode,
+                    operator: SyntheticsAssertionOperator::Is,
+                    target: json!(200),
+                },
+                SyntheticsAssertion {
+                    assertion_type: SyntheticsAssertionType::ResponseTime,
+                    operator: SyntheticsAssertionOperator::LessThan,
+                    target: json!(3000),
+                },
+            ],
+        },
+        options: SyntheticsTestOptions {
+            tick_every: tick_every.unwrap_or(300),
+            min_failure_duration: Some(0),
+            min_location_failed: Some(1),
+            retry: Some(SyntheticsRetry {
+                count: 2,
+                interval: 300,
+            }),
+        },
+        locations,
+        message,
+        tags,
+        status: Some("live".to_string()),
+    };
+
+    let api = SyntheticsApi::new((*ctx).clone());
+    let result = api.create_test(&request).await;
+
+    match result {
+        Ok(data) => {
+            let filepath = store_data(&data, "synthetics_test_created").await?;
+            info!(
+                "Created Synthetics test: {} (ID: {})",
+                data.name, data.public_id
+            );
+
+            Ok(json!({
+                "filepath": filepath,
+                "summary": format!("Created Synthetics test: {}", data.name),
+                "public_id": data.public_id,
+                "name": data.name,
+                "type": data.test_type,
+                "status": data.status,
+                "url": url,
+            }))
+        }
+        Err(e) => {
+            error!("Failed to create Synthetics test: {}", e);
+            Ok(json!({
+                "error": format!("Failed to create Synthetics test: {}", e),
+                "status": "error",
+            }))
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn update_synthetics_test(
+    ctx: Arc<DatadogClient>,
+    public_id: String,
+    name: Option<String>,
+    url: Option<String>,
+    locations: Option<Vec<String>>,
+    message: Option<String>,
+    tags: Option<Vec<String>>,
+    tick_every: Option<i32>,
+) -> anyhow::Result<Value> {
+    use datadog_api::models::*;
+
+    info!("Updating Synthetics test: {}", public_id);
+
+    let api = SyntheticsApi::new((*ctx).clone());
+
+    // Get the existing test
+    let existing = api.get_test(&public_id).await.map_err(|e| {
+        error!("Failed to get existing Synthetics test: {}", e);
+        anyhow::anyhow!("Failed to get existing test: {}", e)
+    })?;
+
+    // Merge updates with existing configuration
+    let updated_config = if let Some(new_url) = url {
+        SyntheticsTestConfig {
+            request: SyntheticsTestRequest {
+                url: new_url,
+                method: existing.config.request.method.clone(),
+                timeout: existing.config.request.timeout,
+                headers: existing.config.request.headers.clone(),
+                body: existing.config.request.body.clone(),
+            },
+            assertions: existing.config.assertions.clone(),
+        }
+    } else {
+        existing.config.clone()
+    };
+
+    let updated_request = SyntheticsTestCreateRequest {
+        name: name.unwrap_or(existing.name),
+        test_type: existing.test_type,
+        subtype: existing.subtype,
+        config: updated_config,
+        options: SyntheticsTestOptions {
+            tick_every: tick_every.unwrap_or(existing.options.tick_every),
+            retry: existing.options.retry,
+            min_failure_duration: existing.options.min_failure_duration,
+            min_location_failed: existing.options.min_location_failed,
+        },
+        locations: locations.unwrap_or(existing.locations),
+        message: message.or(existing.message),
+        tags: tags.or(existing.tags),
+        status: Some(existing.status),
+    };
+
+    // Send the update
+    let result = api.update_test(&public_id, &updated_request).await;
+
+    match result {
+        Ok(data) => {
+            let filepath = store_data(&data, "synthetics_test_updated").await?;
+            info!("Updated Synthetics test: {} (ID: {})", data.name, data.public_id);
+
+            Ok(json!({
+                "filepath": filepath,
+                "summary": format!("Updated Synthetics test: {}", data.name),
+                "public_id": data.public_id,
+                "name": data.name,
+                "status": data.status,
+            }))
+        }
+        Err(e) => {
+            error!("Failed to update Synthetics test: {}", e);
+            Ok(json!({
+                "error": format!("Failed to update Synthetics test: {}", e),
+                "status": "error",
+            }))
+        }
+    }
+}
+
+pub async fn trigger_synthetics_tests(
+    ctx: Arc<DatadogClient>,
+    test_ids: Vec<String>,
+) -> anyhow::Result<Value> {
+    info!("Triggering {} Synthetics test(s)", test_ids.len());
+
+    if test_ids.is_empty() {
+        return Ok(json!({
+            "error": "At least one test ID must be provided",
+            "status": "error",
+        }));
+    }
+
+    let api = SyntheticsApi::new((*ctx).clone());
+    let result = api.trigger_tests(test_ids.clone()).await;
+
+    match result {
+        Ok(data) => {
+            let filepath = store_data(&data, "synthetics_tests_triggered").await?;
+            info!(
+                "Triggered {} test(s), {} check(s) started",
+                test_ids.len(),
+                data.triggered_check_ids.len()
+            );
+
+            Ok(json!({
+                "filepath": filepath,
+                "summary": format!(
+                    "Triggered {} test(s), {} check(s) started",
+                    test_ids.len(),
+                    data.triggered_check_ids.len()
+                ),
+                "test_ids": test_ids,
+                "triggered_check_ids": data.triggered_check_ids,
+                "results": data.results,
+                "status": "success",
+            }))
+        }
+        Err(e) => {
+            error!("Failed to trigger Synthetics tests: {}", e);
+            Ok(json!({
+                "error": format!("Failed to trigger Synthetics tests: {}", e),
                 "status": "error",
             }))
         }
@@ -331,7 +639,10 @@ pub async fn get_security_rules(ctx: Arc<DatadogClient>) -> anyhow::Result<Value
     }
 }
 
-pub async fn get_incidents(ctx: Arc<DatadogClient>, page_size: Option<i32>) -> anyhow::Result<Value> {
+pub async fn get_incidents(
+    ctx: Arc<DatadogClient>,
+    page_size: Option<i32>,
+) -> anyhow::Result<Value> {
     info!("Getting incidents");
 
     let api = IncidentsApi::new((*ctx).clone());
@@ -528,7 +839,10 @@ pub async fn cleanup_cache_tool(older_than_hours: Option<u64>) -> anyhow::Result
 
     match cleanup_cache(hours).await {
         Ok(deleted_count) => {
-            info!("Cleaned up {} files older than {} hours", deleted_count, hours);
+            info!(
+                "Cleaned up {} files older than {} hours",
+                deleted_count, hours
+            );
             Ok(json!({
                 "summary": format!("Cleaned up {} files older than {} hours", deleted_count, hours),
                 "deleted_count": deleted_count,
@@ -584,16 +898,17 @@ fn generate_summary(data: &Value) -> Value {
 
                         let alerting = arr
                             .iter()
-                            .filter(|m| {
-                                m["overall_state"].as_str() == Some("Alert")
-                            })
+                            .filter(|m| m["overall_state"].as_str() == Some("Alert"))
                             .count();
 
                         summary["alerting_monitors"] = json!(alerting);
 
                         if alerting > 0 {
                             if let Some(insights) = summary["key_insights"].as_array_mut() {
-                                insights.push(json!(format!("{} monitors currently alerting", alerting)));
+                                insights.push(json!(format!(
+                                    "{} monitors currently alerting",
+                                    alerting
+                                )));
                             }
                         }
                     }
@@ -688,4 +1003,118 @@ fn analyze_trends(data: &Value) -> Value {
     }
 
     trends
+}
+
+// ============================================================================
+// KUBERNETES HELPER TOOLS
+// ============================================================================
+
+pub async fn get_kubernetes_deployments(
+    ctx: Arc<DatadogClient>,
+    namespace: Option<String>,
+) -> anyhow::Result<Value> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    info!(
+        "Getting Kubernetes deployments{}",
+        namespace
+            .as_ref()
+            .map(|ns| format!(" in namespace: {}", ns))
+            .unwrap_or_default()
+    );
+
+    // Query for deployment replicas in the last 5 minutes
+    let to_ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let from_ts = to_ts - 300; // 5 minutes ago
+
+    // Build query with optional namespace filter
+    let namespace_filter = namespace
+        .as_ref()
+        .map(|ns| format!(",kube_namespace:{}", ns))
+        .unwrap_or_default();
+
+    let query = format!(
+        "avg:kubernetes_state.deployment.replicas_desired{{*{}}} by {{kube_deployment,kube_namespace,kube_cluster_name}}",
+        namespace_filter
+    );
+
+    // Use existing metrics API
+    let api = MetricsApi::new((*ctx).clone());
+    let result = api.query_metrics(from_ts, to_ts, &query).await;
+
+    match result {
+        Ok(data) => {
+            // Extract deployment information from series
+            let mut deployments = Vec::new();
+            let mut unique_deployment_names = std::collections::HashSet::new();
+            let mut unique_namespaces = std::collections::HashSet::new();
+
+            if let Some(series) = &data.series {
+                for s in series {
+                    // Parse tags from scope
+                    let mut tags = std::collections::HashMap::new();
+                    if let Some(scope) = &s.scope {
+                        for tag in scope.split(',') {
+                            if let Some((key, value)) = tag.split_once(':') {
+                                tags.insert(key.to_string(), value.to_string());
+                            }
+                        }
+                    }
+
+                    let deployment = tags
+                        .get("kube_deployment")
+                        .cloned()
+                        .unwrap_or_else(|| "unknown".to_string());
+                    let ns = tags
+                        .get("kube_namespace")
+                        .cloned()
+                        .unwrap_or_else(|| "unknown".to_string());
+                    let cluster = tags
+                        .get("kube_cluster_name")
+                        .cloned()
+                        .unwrap_or_else(|| "unknown".to_string());
+
+                    unique_deployment_names.insert(deployment.clone());
+                    unique_namespaces.insert(ns.clone());
+
+                    deployments.push(json!({
+                        "deployment": deployment,
+                        "namespace": ns,
+                        "cluster": cluster,
+                    }));
+                }
+            }
+
+            let mut deployment_names: Vec<String> = unique_deployment_names.into_iter().collect();
+            deployment_names.sort();
+
+            let mut namespace_list: Vec<String> = unique_namespaces.into_iter().collect();
+            namespace_list.sort();
+
+            let filepath = store_data(&data, "kubernetes_deployments").await?;
+
+            Ok(json!({
+                "filepath": filepath,
+                "summary": format!(
+                    "Found {} deployments across {} namespaces",
+                    deployment_names.len(),
+                    namespace_list.len()
+                ),
+                "deployments": deployments,
+                "unique_deployment_names": deployment_names,
+                "unique_namespaces": namespace_list,
+                "status": "success",
+            }))
+        }
+        Err(e) => {
+            error!("Failed to get Kubernetes deployments: {}", e);
+            Ok(json!({
+                "error": format!("Failed to get Kubernetes deployments: {}", e),
+                "status": "error",
+            }))
+        }
+    }
 }

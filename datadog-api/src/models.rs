@@ -263,6 +263,161 @@ pub struct SyntheticsTest {
     pub tags: Option<Tags>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyntheticsLocation {
+    pub id: String,
+    pub name: String,
+    pub is_private: Option<bool>,
+    pub region: Option<SyntheticsRegion>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyntheticsRegion {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyntheticsLocationsResponse {
+    pub locations: Vec<SyntheticsLocation>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyntheticsTestRequest {
+    pub method: String,
+    pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub headers: Option<std::collections::HashMap<String, String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SyntheticsAssertionType {
+    StatusCode,
+    ResponseTime,
+    Body,
+    Header,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SyntheticsAssertionOperator {
+    Is,
+    IsNot,
+    LessThan,
+    GreaterThan,
+    Contains,
+    DoesNotContain,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyntheticsAssertion {
+    #[serde(rename = "type")]
+    pub assertion_type: SyntheticsAssertionType,
+    pub operator: SyntheticsAssertionOperator,
+    pub target: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyntheticsTestConfig {
+    pub request: SyntheticsTestRequest,
+    pub assertions: Vec<SyntheticsAssertion>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyntheticsTestOptions {
+    pub tick_every: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_failure_duration: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_location_failed: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry: Option<SyntheticsRetry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyntheticsRetry {
+    pub count: i32,
+    pub interval: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SyntheticsTestType {
+    Api,
+    Browser,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SyntheticsTestSubtype {
+    Http,
+    Ssl,
+    Tcp,
+    Dns,
+    Multi,
+    Grpc,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyntheticsTestCreateRequest {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub test_type: SyntheticsTestType,
+    pub subtype: SyntheticsTestSubtype,
+    pub config: SyntheticsTestConfig,
+    pub options: SyntheticsTestOptions,
+    pub locations: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyntheticsTestResponse {
+    pub public_id: String,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub test_type: SyntheticsTestType,
+    pub subtype: SyntheticsTestSubtype,
+    pub config: SyntheticsTestConfig,
+    pub options: SyntheticsTestOptions,
+    pub locations: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyntheticsTriggerRequest {
+    pub tests: Vec<SyntheticsTriggerTest>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyntheticsTriggerTest {
+    pub public_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyntheticsTriggerResponse {
+    pub triggered_check_ids: Vec<String>,
+    pub results: Vec<SyntheticsTriggerResult>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyntheticsTriggerResult {
+    pub public_id: String,
+    pub result_id: String,
+}
+
 // Security
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecurityRulesResponse {

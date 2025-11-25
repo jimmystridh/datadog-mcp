@@ -1,0 +1,246 @@
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+
+// ============================================================================
+// METRICS & MONITORING TOOL INPUTS
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct GetMetricsInput {
+    #[schemars(description = "Metric query")]
+    pub query: String,
+    #[schemars(description = "Start timestamp (Unix epoch)")]
+    pub from_timestamp: i64,
+    #[schemars(description = "End timestamp (Unix epoch)")]
+    pub to_timestamp: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SearchMetricsInput {
+    #[schemars(description = "Search pattern for metric names")]
+    pub query: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct GetMetricMetadataInput {
+    #[schemars(description = "Name of the metric")]
+    pub metric_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct GetMonitorInput {
+    #[schemars(description = "Monitor ID")]
+    pub monitor_id: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CreateMonitorInput {
+    #[schemars(description = "Monitor name")]
+    pub name: String,
+    #[schemars(description = "Monitor type")]
+    pub monitor_type: String,
+    #[schemars(description = "Monitor query")]
+    pub query: String,
+    #[schemars(description = "Monitor message")]
+    pub message: Option<String>,
+    #[schemars(description = "Monitor options")]
+    pub options: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct UpdateMonitorInput {
+    #[schemars(description = "Monitor ID")]
+    pub monitor_id: i64,
+    #[schemars(description = "Monitor name")]
+    pub name: Option<String>,
+    #[schemars(description = "Monitor query")]
+    pub query: Option<String>,
+    #[schemars(description = "Monitor message")]
+    pub message: Option<String>,
+    #[schemars(description = "Monitor options")]
+    pub options: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DeleteMonitorInput {
+    #[schemars(description = "Monitor ID to delete")]
+    pub monitor_id: i64,
+}
+
+// ============================================================================
+// DASHBOARD TOOL INPUTS
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct GetDashboardInput {
+    #[schemars(description = "Dashboard ID")]
+    pub dashboard_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CreateDashboardInput {
+    #[schemars(description = "Dashboard title")]
+    pub title: String,
+    #[schemars(description = "Dashboard layout type")]
+    pub layout_type: String,
+    #[schemars(description = "Dashboard widgets")]
+    pub widgets: Vec<serde_json::Value>,
+    #[schemars(description = "Dashboard description")]
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct UpdateDashboardInput {
+    #[schemars(description = "Dashboard ID")]
+    pub dashboard_id: String,
+    #[schemars(description = "Dashboard title")]
+    pub title: Option<String>,
+    #[schemars(description = "Dashboard widgets")]
+    pub widgets: Option<Vec<serde_json::Value>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DeleteDashboardInput {
+    #[schemars(description = "Dashboard ID")]
+    pub dashboard_id: String,
+}
+
+// ============================================================================
+// LOGS & EVENTS TOOL INPUTS
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SearchLogsInput {
+    #[schemars(description = "Log search query")]
+    pub query: String,
+    #[schemars(description = "Start time")]
+    pub from_time: String,
+    #[schemars(description = "End time")]
+    pub to_time: String,
+    #[schemars(description = "Result limit")]
+    pub limit: Option<i32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct GetEventsInput {
+    #[schemars(description = "Start timestamp")]
+    pub start: i64,
+    #[schemars(description = "End timestamp")]
+    pub end: i64,
+    #[schemars(description = "Event priority filter")]
+    pub priority: Option<String>,
+    #[schemars(description = "Event sources filter")]
+    pub sources: Option<String>,
+}
+
+// ============================================================================
+// INFRASTRUCTURE & TAGS TOOL INPUTS
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct GetTagsInput {
+    #[schemars(description = "Tag source filter")]
+    pub source: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CreateDowntimeInput {
+    #[schemars(description = "Downtime scope")]
+    pub scope: Vec<String>,
+    #[schemars(description = "Start timestamp")]
+    pub start: Option<i64>,
+    #[schemars(description = "End timestamp")]
+    pub end: Option<i64>,
+    #[schemars(description = "Downtime message")]
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CancelDowntimeInput {
+    #[schemars(description = "Downtime ID to cancel")]
+    pub downtime_id: i64,
+}
+
+// ============================================================================
+// INCIDENTS TOOL INPUTS
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct GetIncidentsInput {
+    #[schemars(description = "Page size for pagination")]
+    pub page_size: Option<i32>,
+}
+
+// ============================================================================
+// SYNTHETICS TOOL INPUTS
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CreateSyntheticsTestInput {
+    #[schemars(description = "Name of the Synthetics test")]
+    pub name: String,
+    #[schemars(description = "Type of test (currently only 'api' is supported for HTTP checks)")]
+    pub test_type: String,
+    #[schemars(description = "URL to monitor")]
+    pub url: String,
+    #[schemars(description = "List of location IDs (e.g., ['aws:eu-central-1'])")]
+    pub locations: Vec<String>,
+    #[schemars(description = "Optional notification message")]
+    pub message: Option<String>,
+    #[schemars(description = "Optional list of tags")]
+    pub tags: Option<Vec<String>>,
+    #[schemars(description = "Test frequency in seconds (default: 300)")]
+    pub tick_every: Option<i32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TriggerSyntheticsTestsInput {
+    #[schemars(description = "List of Synthetics test public IDs to trigger")]
+    pub test_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct UpdateSyntheticsTestInput {
+    #[schemars(description = "Public ID of the test to update")]
+    pub public_id: String,
+    #[schemars(description = "Optional new name")]
+    pub name: Option<String>,
+    #[schemars(description = "Optional new URL")]
+    pub url: Option<String>,
+    #[schemars(description = "Optional new locations")]
+    pub locations: Option<Vec<String>>,
+    #[schemars(description = "Optional new message")]
+    pub message: Option<String>,
+    #[schemars(description = "Optional new tags")]
+    pub tags: Option<Vec<String>>,
+    #[schemars(description = "Test frequency in seconds")]
+    pub tick_every: Option<i32>,
+}
+
+// ============================================================================
+// KUBERNETES TOOL INPUTS
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct GetKubernetesDeploymentsInput {
+    #[schemars(description = "Optional Kubernetes namespace filter")]
+    pub namespace: Option<String>,
+}
+
+// ============================================================================
+// UTILITIES TOOL INPUTS
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AnalyzeDataInput {
+    #[schemars(description = "File path to analyze")]
+    pub filepath: String,
+    #[schemars(description = "Analysis type: summary, stats, or trends")]
+    pub analysis_type: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CleanupCacheInput {
+    #[schemars(description = "Delete files older than this many hours")]
+    pub older_than_hours: Option<u64>,
+}

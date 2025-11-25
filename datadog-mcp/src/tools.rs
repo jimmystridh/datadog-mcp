@@ -1,7 +1,5 @@
 use crate::cache::store_data;
-use datadog_api::{
-    apis::*, models::*, DatadogClient,
-};
+use datadog_api::{apis::*, models::*, DatadogClient};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -49,7 +47,9 @@ pub async fn get_metrics(
     info!("Querying metrics: {}", query);
 
     let api = MetricsApi::new((*ctx).clone());
-    let result = api.query_metrics(from_timestamp, to_timestamp, &query).await;
+    let result = api
+        .query_metrics(from_timestamp, to_timestamp, &query)
+        .await;
 
     match result {
         Ok(data) => {
@@ -485,7 +485,9 @@ pub async fn update_dashboard(
         template_variables: existing.template_variables,
     };
 
-    let result = api.update_dashboard(&dashboard_id, &updated_dashboard).await;
+    let result = api
+        .update_dashboard(&dashboard_id, &updated_dashboard)
+        .await;
 
     match result {
         Ok(data) => {

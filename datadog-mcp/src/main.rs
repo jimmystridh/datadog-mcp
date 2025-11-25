@@ -1,4 +1,5 @@
 pub mod cache;
+mod output;
 mod server;
 mod state;
 mod tool_inputs;
@@ -6,15 +7,37 @@ mod tools;
 mod tools_part2;
 
 use anyhow::Result;
+use clap::Parser;
 use datadog_api::DatadogConfig;
+use output::OutputFormat;
 use rmcp::{transport::stdio, ServiceExt};
 use server::DatadogMcpServer;
 use state::ServerState;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
+#[derive(Parser, Debug)]
+#[command(name = "datadog-mcp")]
+#[command(about = "Datadog MCP Server - Model Context Protocol server for Datadog API", long_about = None)]
+struct Args {
+    /// Output format for MCP responses (json or toon)
+    #[arg(long, default_value = "toon", value_parser = parse_format)]
+    format: OutputFormat,
+}
+
+fn parse_format(s: &str) -> Result<OutputFormat, String> {
+    match s.to_lowercase().as_str() {
+        "json" => Ok(OutputFormat::Json),
+        "toon" => Ok(OutputFormat::Toon),
+        _ => Err(format!("Invalid format '{}'. Must be 'json' or 'toon'", s)),
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Parse command-line arguments
+    let args = Args::parse();
+
     // Load environment variables from .env file and force override
     if let Ok(path) = dotenv::dotenv() {
         // Parse .env file and explicitly set environment variables to override any existing ones
@@ -37,6 +60,7 @@ async fn main() -> Result<()> {
         .init();
 
     info!("Starting Datadog MCP Server");
+    info!("Output format: {:?}", args.format);
 
     // Initialize cache
     cache::init_cache().await?;
@@ -45,8 +69,8 @@ async fn main() -> Result<()> {
     let config = DatadogConfig::from_env()?;
     info!("Loaded Datadog configuration for site: {}", config.site);
 
-    // Initialize server state
-    let state = ServerState::new(config).await?;
+    // Initialize server state with output format
+    let state = ServerState::new(config, args.format).await?;
     info!("Server state initialized");
 
     // Test connection to Datadog

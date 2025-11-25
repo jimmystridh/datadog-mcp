@@ -1,3 +1,4 @@
+use crate::output::{Formattable, OutputFormat};
 use crate::state::ServerState;
 use crate::tool_inputs::*;
 use crate::tools;
@@ -10,10 +11,17 @@ use rmcp::{
     service::RequestContext,
     tool, Error as McpError, RoleServer, ServerHandler,
 };
+use serde::Serialize;
 use std::sync::Arc;
 
 fn to_mcp_error(err: anyhow::Error) -> ErrorData {
     ErrorData::new(ErrorCode(-32603), err.to_string(), None)
+}
+
+/// Format response using the specified format with fallback to JSON
+fn format_response<T: Serialize + Formattable>(data: &T, format: OutputFormat) -> String {
+    data.format(format)
+        .unwrap_or_else(|_| serde_json::to_string_pretty(data).unwrap_or_default())
 }
 
 #[allow(dead_code)]
@@ -65,11 +73,11 @@ impl DatadogMcpServer {
 
     #[tool(description = "Validate Datadog API credentials")]
     pub async fn validate_api_key(&self) -> Result<CallToolResult, ErrorData> {
-        let result = tools::validate_api_key(self.state.client.clone())
+        let result = tools::validate_api_key(self.state.tool_context())
             .await
             .map_err(to_mcp_error)?;
 
-        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+        let text = format_response(&result, self.state.output_format);
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -79,7 +87,7 @@ impl DatadogMcpServer {
         #[tool(aggr)] input: GetMetricsInput,
     ) -> Result<CallToolResult, ErrorData> {
         let result = tools::get_metrics(
-            self.state.client.clone(),
+            self.state.tool_context(),
             input.query,
             input.from_timestamp,
             input.to_timestamp,
@@ -87,7 +95,7 @@ impl DatadogMcpServer {
         .await
         .map_err(to_mcp_error)?;
 
-        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+        let text = format_response(&result, self.state.output_format);
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -96,11 +104,11 @@ impl DatadogMcpServer {
         &self,
         #[tool(aggr)] input: SearchMetricsInput,
     ) -> Result<CallToolResult, ErrorData> {
-        let result = tools::search_metrics(self.state.client.clone(), input.query)
+        let result = tools::search_metrics(self.state.tool_context(), input.query)
             .await
             .map_err(to_mcp_error)?;
 
-        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+        let text = format_response(&result, self.state.output_format);
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -109,21 +117,21 @@ impl DatadogMcpServer {
         &self,
         #[tool(aggr)] input: GetMetricMetadataInput,
     ) -> Result<CallToolResult, ErrorData> {
-        let result = tools::get_metric_metadata(self.state.client.clone(), input.metric_name)
+        let result = tools::get_metric_metadata(self.state.tool_context(), input.metric_name)
             .await
             .map_err(to_mcp_error)?;
 
-        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+        let text = format_response(&result, self.state.output_format);
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
     #[tool(description = "Get all Datadog monitors")]
     pub async fn get_monitors(&self) -> Result<CallToolResult, ErrorData> {
-        let result = tools::get_monitors(self.state.client.clone())
+        let result = tools::get_monitors(self.state.tool_context())
             .await
             .map_err(to_mcp_error)?;
 
-        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+        let text = format_response(&result, self.state.output_format);
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -132,11 +140,11 @@ impl DatadogMcpServer {
         &self,
         #[tool(aggr)] input: GetMonitorInput,
     ) -> Result<CallToolResult, ErrorData> {
-        let result = tools::get_monitor(self.state.client.clone(), input.monitor_id)
+        let result = tools::get_monitor(self.state.tool_context(), input.monitor_id)
             .await
             .map_err(to_mcp_error)?;
 
-        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+        let text = format_response(&result, self.state.output_format);
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -146,7 +154,7 @@ impl DatadogMcpServer {
         #[tool(aggr)] input: CreateMonitorInput,
     ) -> Result<CallToolResult, ErrorData> {
         let result = tools::create_monitor(
-            self.state.client.clone(),
+            self.state.tool_context(),
             input.name,
             input.monitor_type,
             input.query,
@@ -156,7 +164,7 @@ impl DatadogMcpServer {
         .await
         .map_err(to_mcp_error)?;
 
-        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+        let text = format_response(&result, self.state.output_format);
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -166,7 +174,7 @@ impl DatadogMcpServer {
         #[tool(aggr)] input: UpdateMonitorInput,
     ) -> Result<CallToolResult, ErrorData> {
         let result = tools::update_monitor(
-            self.state.client.clone(),
+            self.state.tool_context(),
             input.monitor_id,
             input.name,
             input.query,
@@ -176,7 +184,7 @@ impl DatadogMcpServer {
         .await
         .map_err(to_mcp_error)?;
 
-        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+        let text = format_response(&result, self.state.output_format);
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -185,11 +193,11 @@ impl DatadogMcpServer {
         &self,
         #[tool(aggr)] input: DeleteMonitorInput,
     ) -> Result<CallToolResult, ErrorData> {
-        let result = tools::delete_monitor(self.state.client.clone(), input.monitor_id)
+        let result = tools::delete_monitor(self.state.tool_context(), input.monitor_id)
             .await
             .map_err(to_mcp_error)?;
 
-        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+        let text = format_response(&result, self.state.output_format);
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -199,11 +207,11 @@ impl DatadogMcpServer {
 
     #[tool(description = "Get all Datadog dashboards")]
     pub async fn get_dashboards(&self) -> Result<CallToolResult, ErrorData> {
-        let result = tools::get_dashboards(self.state.client.clone())
+        let result = tools::get_dashboards(self.state.tool_context())
             .await
             .map_err(to_mcp_error)?;
 
-        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+        let text = format_response(&result, self.state.output_format);
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -212,11 +220,11 @@ impl DatadogMcpServer {
         &self,
         #[tool(aggr)] input: GetDashboardInput,
     ) -> Result<CallToolResult, ErrorData> {
-        let result = tools::get_dashboard(self.state.client.clone(), input.dashboard_id)
+        let result = tools::get_dashboard(self.state.tool_context(), input.dashboard_id)
             .await
             .map_err(to_mcp_error)?;
 
-        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+        let text = format_response(&result, self.state.output_format);
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -226,7 +234,7 @@ impl DatadogMcpServer {
         #[tool(aggr)] input: CreateDashboardInput,
     ) -> Result<CallToolResult, ErrorData> {
         let result = tools::create_dashboard(
-            self.state.client.clone(),
+            self.state.tool_context(),
             input.title,
             input.layout_type,
             input.widgets,
@@ -235,7 +243,7 @@ impl DatadogMcpServer {
         .await
         .map_err(to_mcp_error)?;
 
-        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+        let text = format_response(&result, self.state.output_format);
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -245,7 +253,7 @@ impl DatadogMcpServer {
         #[tool(aggr)] input: UpdateDashboardInput,
     ) -> Result<CallToolResult, ErrorData> {
         let result = tools::update_dashboard(
-            self.state.client.clone(),
+            self.state.tool_context(),
             input.dashboard_id,
             input.title,
             input.widgets,
@@ -253,7 +261,7 @@ impl DatadogMcpServer {
         .await
         .map_err(to_mcp_error)?;
 
-        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+        let text = format_response(&result, self.state.output_format);
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -262,11 +270,11 @@ impl DatadogMcpServer {
         &self,
         #[tool(aggr)] input: DeleteDashboardInput,
     ) -> Result<CallToolResult, ErrorData> {
-        let result = tools::delete_dashboard(self.state.client.clone(), input.dashboard_id)
+        let result = tools::delete_dashboard(self.state.tool_context(), input.dashboard_id)
             .await
             .map_err(to_mcp_error)?;
 
-        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+        let text = format_response(&result, self.state.output_format);
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -280,7 +288,7 @@ impl DatadogMcpServer {
         #[tool(aggr)] input: SearchLogsInput,
     ) -> Result<CallToolResult, ErrorData> {
         let result = tools_part2::search_logs(
-            self.state.client.clone(),
+            self.state.tool_context(),
             input.query,
             input.from_time,
             input.to_time,
@@ -289,7 +297,7 @@ impl DatadogMcpServer {
         .await
         .map_err(to_mcp_error)?;
 
-        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+        let text = format_response(&result, self.state.output_format);
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -299,7 +307,7 @@ impl DatadogMcpServer {
         #[tool(aggr)] input: GetEventsInput,
     ) -> Result<CallToolResult, ErrorData> {
         let result = tools_part2::get_events(
-            self.state.client.clone(),
+            self.state.tool_context(),
             input.start,
             input.end,
             input.priority,
@@ -308,7 +316,7 @@ impl DatadogMcpServer {
         .await
         .map_err(to_mcp_error)?;
 
-        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+        let text = format_response(&result, self.state.output_format);
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -318,11 +326,11 @@ impl DatadogMcpServer {
 
     #[tool(description = "Get infrastructure and hosts information")]
     pub async fn get_infrastructure(&self) -> Result<CallToolResult, ErrorData> {
-        let result = tools_part2::get_infrastructure(self.state.client.clone())
+        let result = tools_part2::get_infrastructure(self.state.tool_context())
             .await
             .map_err(to_mcp_error)?;
 
-        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+        let text = format_response(&result, self.state.output_format);
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -331,11 +339,11 @@ impl DatadogMcpServer {
         &self,
         #[tool(aggr)] input: GetTagsInput,
     ) -> Result<CallToolResult, ErrorData> {
-        let result = tools_part2::get_tags(self.state.client.clone(), input.source)
+        let result = tools_part2::get_tags(self.state.tool_context(), input.source)
             .await
             .map_err(to_mcp_error)?;
 
-        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+        let text = format_response(&result, self.state.output_format);
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -345,21 +353,21 @@ impl DatadogMcpServer {
         #[tool(aggr)] input: GetKubernetesDeploymentsInput,
     ) -> Result<CallToolResult, ErrorData> {
         let result =
-            tools_part2::get_kubernetes_deployments(self.state.client.clone(), input.namespace)
+            tools_part2::get_kubernetes_deployments(self.state.tool_context(), input.namespace)
                 .await
                 .map_err(to_mcp_error)?;
 
-        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+        let text = format_response(&result, self.state.output_format);
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
     #[tool(description = "Get scheduled downtimes")]
     pub async fn get_downtimes(&self) -> Result<CallToolResult, ErrorData> {
-        let result = tools_part2::get_downtimes(self.state.client.clone())
+        let result = tools_part2::get_downtimes(self.state.tool_context())
             .await
             .map_err(to_mcp_error)?;
 
-        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+        let text = format_response(&result, self.state.output_format);
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -369,7 +377,7 @@ impl DatadogMcpServer {
         #[tool(aggr)] input: CreateDowntimeInput,
     ) -> Result<CallToolResult, ErrorData> {
         let result = tools_part2::create_downtime(
-            self.state.client.clone(),
+            self.state.tool_context(),
             input.scope,
             input.start,
             input.end,
@@ -378,7 +386,7 @@ impl DatadogMcpServer {
         .await
         .map_err(to_mcp_error)?;
 
-        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+        let text = format_response(&result, self.state.output_format);
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -387,11 +395,11 @@ impl DatadogMcpServer {
         &self,
         #[tool(aggr)] input: CancelDowntimeInput,
     ) -> Result<CallToolResult, ErrorData> {
-        let result = tools_part2::cancel_downtime(self.state.client.clone(), input.downtime_id)
+        let result = tools_part2::cancel_downtime(self.state.tool_context(), input.downtime_id)
             .await
             .map_err(to_mcp_error)?;
 
-        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+        let text = format_response(&result, self.state.output_format);
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -401,21 +409,21 @@ impl DatadogMcpServer {
 
     #[tool(description = "Get all Synthetics tests")]
     pub async fn get_synthetics_tests(&self) -> Result<CallToolResult, ErrorData> {
-        let result = tools_part2::get_synthetics_tests(self.state.client.clone())
+        let result = tools_part2::get_synthetics_tests(self.state.tool_context())
             .await
             .map_err(to_mcp_error)?;
 
-        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+        let text = format_response(&result, self.state.output_format);
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
     #[tool(description = "Get all available Synthetics testing locations")]
     pub async fn get_synthetics_locations(&self) -> Result<CallToolResult, ErrorData> {
-        let result = tools_part2::get_synthetics_locations(self.state.client.clone())
+        let result = tools_part2::get_synthetics_locations(self.state.tool_context())
             .await
             .map_err(to_mcp_error)?;
 
-        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+        let text = format_response(&result, self.state.output_format);
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -425,7 +433,7 @@ impl DatadogMcpServer {
         #[tool(aggr)] input: CreateSyntheticsTestInput,
     ) -> Result<CallToolResult, ErrorData> {
         let result = tools_part2::create_synthetics_test(
-            self.state.client.clone(),
+            self.state.tool_context(),
             input.name,
             input.test_type,
             input.url,
@@ -437,7 +445,7 @@ impl DatadogMcpServer {
         .await
         .map_err(to_mcp_error)?;
 
-        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+        let text = format_response(&result, self.state.output_format);
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -447,7 +455,7 @@ impl DatadogMcpServer {
         #[tool(aggr)] input: UpdateSyntheticsTestInput,
     ) -> Result<CallToolResult, ErrorData> {
         let result = tools_part2::update_synthetics_test(
-            self.state.client.clone(),
+            self.state.tool_context(),
             input.public_id,
             input.name,
             input.url,
@@ -459,7 +467,7 @@ impl DatadogMcpServer {
         .await
         .map_err(to_mcp_error)?;
 
-        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+        let text = format_response(&result, self.state.output_format);
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -469,11 +477,11 @@ impl DatadogMcpServer {
         #[tool(aggr)] input: TriggerSyntheticsTestsInput,
     ) -> Result<CallToolResult, ErrorData> {
         let result =
-            tools_part2::trigger_synthetics_tests(self.state.client.clone(), input.test_ids)
+            tools_part2::trigger_synthetics_tests(self.state.tool_context(), input.test_ids)
                 .await
                 .map_err(to_mcp_error)?;
 
-        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+        let text = format_response(&result, self.state.output_format);
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -483,11 +491,11 @@ impl DatadogMcpServer {
 
     #[tool(description = "Get security monitoring rules")]
     pub async fn get_security_rules(&self) -> Result<CallToolResult, ErrorData> {
-        let result = tools_part2::get_security_rules(self.state.client.clone())
+        let result = tools_part2::get_security_rules(self.state.tool_context())
             .await
             .map_err(to_mcp_error)?;
 
-        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+        let text = format_response(&result, self.state.output_format);
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -496,31 +504,31 @@ impl DatadogMcpServer {
         &self,
         #[tool(aggr)] input: GetIncidentsInput,
     ) -> Result<CallToolResult, ErrorData> {
-        let result = tools_part2::get_incidents(self.state.client.clone(), input.page_size)
+        let result = tools_part2::get_incidents(self.state.tool_context(), input.page_size)
             .await
             .map_err(to_mcp_error)?;
 
-        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+        let text = format_response(&result, self.state.output_format);
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
     #[tool(description = "Get Service Level Objectives")]
     pub async fn get_slos(&self) -> Result<CallToolResult, ErrorData> {
-        let result = tools_part2::get_slos(self.state.client.clone())
+        let result = tools_part2::get_slos(self.state.tool_context())
             .await
             .map_err(to_mcp_error)?;
 
-        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+        let text = format_response(&result, self.state.output_format);
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
     #[tool(description = "Get Datadog notebooks")]
     pub async fn get_notebooks(&self) -> Result<CallToolResult, ErrorData> {
-        let result = tools_part2::get_notebooks(self.state.client.clone())
+        let result = tools_part2::get_notebooks(self.state.tool_context())
             .await
             .map_err(to_mcp_error)?;
 
-        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+        let text = format_response(&result, self.state.output_format);
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -530,21 +538,21 @@ impl DatadogMcpServer {
 
     #[tool(description = "Get teams")]
     pub async fn get_teams(&self) -> Result<CallToolResult, ErrorData> {
-        let result = tools_part2::get_teams(self.state.client.clone())
+        let result = tools_part2::get_teams(self.state.tool_context())
             .await
             .map_err(to_mcp_error)?;
 
-        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+        let text = format_response(&result, self.state.output_format);
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
     #[tool(description = "Get users")]
     pub async fn get_users(&self) -> Result<CallToolResult, ErrorData> {
-        let result = tools_part2::get_users(self.state.client.clone())
+        let result = tools_part2::get_users(self.state.tool_context())
             .await
             .map_err(to_mcp_error)?;
 
-        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+        let text = format_response(&result, self.state.output_format);
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -561,7 +569,7 @@ impl DatadogMcpServer {
             .await
             .map_err(to_mcp_error)?;
 
-        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+        let text = format_response(&result, self.state.output_format);
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -574,7 +582,7 @@ impl DatadogMcpServer {
             .await
             .map_err(to_mcp_error)?;
 
-        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+        let text = format_response(&result, self.state.output_format);
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 }

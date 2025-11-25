@@ -251,6 +251,7 @@ fn test_retry_config_defaults() {
 #[tokio::test]
 async fn test_cache_store_and_load() {
     use datadog_mcp::cache::{store_data, load_data};
+    use datadog_mcp::output::OutputFormat;
 
     let test_data = json!({
         "test": "value",
@@ -258,9 +259,9 @@ async fn test_cache_store_and_load() {
         "array": [1, 2, 3]
     });
 
-    let filepath = store_data(&test_data, "test").await.unwrap();
+    let filepath = store_data(&test_data, "test", OutputFormat::Json).await.unwrap();
     assert!(filepath.contains("test_"));
-    assert!(filepath.ends_with(".json"));
+    assert!(filepath.ends_with(".json")); // Cache uses JSON for data preservation
 
     let loaded = load_data(&filepath).await.unwrap();
     assert_eq!(loaded, test_data);
@@ -272,12 +273,13 @@ async fn test_cache_store_and_load() {
 #[tokio::test]
 async fn test_cache_unique_filenames() {
     use datadog_mcp::cache::store_data;
+    use datadog_mcp::output::OutputFormat;
 
     let data1 = json!({"id": 1});
     let data2 = json!({"id": 2});
 
-    let filepath1 = store_data(&data1, "unique").await.unwrap();
-    let filepath2 = store_data(&data2, "unique").await.unwrap();
+    let filepath1 = store_data(&data1, "unique", OutputFormat::Json).await.unwrap();
+    let filepath2 = store_data(&data2, "unique", OutputFormat::Json).await.unwrap();
 
     assert_ne!(filepath1, filepath2);
 

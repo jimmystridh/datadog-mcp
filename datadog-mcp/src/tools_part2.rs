@@ -1,8 +1,9 @@
 use crate::cache::{cleanup_cache, load_data, store_data};
-use datadog_api::{apis::*, models::*, DatadogClient};
+use crate::state::ToolContext;
+use datadog_api::{apis::*, models::*};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::sync::Arc;
+
 use tracing::{error, info};
 
 // ============================================================================
@@ -10,7 +11,7 @@ use tracing::{error, info};
 // ============================================================================
 
 pub async fn search_logs(
-    ctx: Arc<DatadogClient>,
+    ctx: ToolContext,
     query: String,
     from_time: String,
     to_time: String,
@@ -31,13 +32,13 @@ pub async fn search_logs(
         sort: Some("timestamp".to_string()),
     };
 
-    let api = LogsApi::new((*ctx).clone());
+    let api = LogsApi::new((*ctx.client).clone());
     let result = api.search_logs(&request).await;
 
     match result {
         Ok(data) => {
             let logs = data.data.as_ref().map(|l| l.len()).unwrap_or(0);
-            let filepath = store_data(&data, "logs").await?;
+            let filepath = store_data(&data, "logs", ctx.output_format).await?;
             info!("Retrieved {} log entries", logs);
 
             Ok(json!({
@@ -59,7 +60,7 @@ pub async fn search_logs(
 }
 
 pub async fn get_events(
-    ctx: Arc<DatadogClient>,
+    ctx: ToolContext,
     start: i64,
     end: i64,
     priority: Option<String>,
@@ -67,7 +68,7 @@ pub async fn get_events(
 ) -> anyhow::Result<Value> {
     info!("Getting events from {} to {}", start, end);
 
-    let api = EventsApi::new((*ctx).clone());
+    let api = EventsApi::new((*ctx.client).clone());
     let result = api
         .list_events(start, end, priority.as_deref(), sources.as_deref())
         .await;
@@ -75,7 +76,7 @@ pub async fn get_events(
     match result {
         Ok(data) => {
             let events = data.events.as_ref().map(|e| e.len()).unwrap_or(0);
-            let filepath = store_data(&data, "events").await?;
+            let filepath = store_data(&data, "events", ctx.output_format).await?;
             info!("Retrieved {} events", events);
 
             Ok(json!({
@@ -102,10 +103,10 @@ pub async fn get_events(
 // INFRASTRUCTURE & TAGS TOOLS
 // ============================================================================
 
-pub async fn get_infrastructure(ctx: Arc<DatadogClient>) -> anyhow::Result<Value> {
+pub async fn get_infrastructure(ctx: ToolContext) -> anyhow::Result<Value> {
     info!("Getting infrastructure information");
 
-    let api = InfrastructureApi::new((*ctx).clone());
+    let api = InfrastructureApi::new((*ctx.client).clone());
     let result = api.list_hosts().await;
 
     match result {
@@ -114,7 +115,7 @@ pub async fn get_infrastructure(ctx: Arc<DatadogClient>) -> anyhow::Result<Value
             let active_hosts = hosts.iter().filter(|h| h.up.unwrap_or(false)).count();
             let total_hosts = hosts.len();
 
-            let filepath = store_data(&data, "infrastructure").await?;
+            let filepath = store_data(&data, "infrastructure", ctx.output_format).await?;
             info!("Found {} hosts ({} active)", total_hosts, active_hosts);
 
             Ok(json!({
@@ -136,16 +137,16 @@ pub async fn get_infrastructure(ctx: Arc<DatadogClient>) -> anyhow::Result<Value
     }
 }
 
-pub async fn get_tags(ctx: Arc<DatadogClient>, source: Option<String>) -> anyhow::Result<Value> {
+pub async fn get_tags(ctx: ToolContext, source: Option<String>) -> anyhow::Result<Value> {
     info!("Getting host tags");
 
-    let api = InfrastructureApi::new((*ctx).clone());
+    let api = InfrastructureApi::new((*ctx.client).clone());
     let result = api.get_tags(source.as_deref()).await;
 
     match result {
         Ok(data) => {
             let tags = data.tags.as_ref().map(|t| t.len()).unwrap_or(0);
-            let filepath = store_data(&data, "tags").await?;
+            let filepath = store_data(&data, "tags", ctx.output_format).await?;
 
             Ok(json!({
                 "filepath": filepath,
@@ -165,16 +166,16 @@ pub async fn get_tags(ctx: Arc<DatadogClient>, source: Option<String>) -> anyhow
     }
 }
 
-pub async fn get_downtimes(ctx: Arc<DatadogClient>) -> anyhow::Result<Value> {
+pub async fn get_downtimes(ctx: ToolContext) -> anyhow::Result<Value> {
     info!("Getting scheduled downtimes");
 
-    let api = DowntimesApi::new((*ctx).clone());
+    let api = DowntimesApi::new((*ctx.client).clone());
     let result = api.list_downtimes().await;
 
     match result {
         Ok(data) => {
             let active_count = data.iter().filter(|d| d.active.unwrap_or(false)).count();
-            let filepath = store_data(&data, "downtimes").await?;
+            let filepath = store_data(&data, "downtimes", ctx.output_format).await?;
 
             Ok(json!({
                 "filepath": filepath,
@@ -195,7 +196,7 @@ pub async fn get_downtimes(ctx: Arc<DatadogClient>) -> anyhow::Result<Value> {
 }
 
 pub async fn create_downtime(
-    ctx: Arc<DatadogClient>,
+    ctx: ToolContext,
     scope: Vec<String>,
     start: Option<i64>,
     end: Option<i64>,
@@ -210,12 +211,12 @@ pub async fn create_downtime(
         message,
     };
 
-    let api = DowntimesApi::new((*ctx).clone());
+    let api = DowntimesApi::new((*ctx.client).clone());
     let result = api.create_downtime(&request).await;
 
     match result {
         Ok(data) => {
-            let filepath = store_data(&data, "downtime_created").await?;
+            let filepath = store_data(&data, "downtime_created", ctx.output_format).await?;
             info!("Created downtime (ID: {:?})", data.id);
 
             Ok(json!({
@@ -236,10 +237,10 @@ pub async fn create_downtime(
     }
 }
 
-pub async fn cancel_downtime(ctx: Arc<DatadogClient>, downtime_id: i64) -> anyhow::Result<Value> {
+pub async fn cancel_downtime(ctx: ToolContext, downtime_id: i64) -> anyhow::Result<Value> {
     info!("Cancelling downtime ID: {}", downtime_id);
 
-    let api = DowntimesApi::new((*ctx).clone());
+    let api = DowntimesApi::new((*ctx.client).clone());
     let result = api.cancel_downtime(downtime_id).await;
 
     match result {
@@ -265,10 +266,10 @@ pub async fn cancel_downtime(ctx: Arc<DatadogClient>, downtime_id: i64) -> anyho
 // TESTING & APPLICATIONS TOOLS
 // ============================================================================
 
-pub async fn get_synthetics_tests(ctx: Arc<DatadogClient>) -> anyhow::Result<Value> {
+pub async fn get_synthetics_tests(ctx: ToolContext) -> anyhow::Result<Value> {
     info!("Getting Synthetics tests");
 
-    let api = SyntheticsApi::new((*ctx).clone());
+    let api = SyntheticsApi::new((*ctx.client).clone());
     let result = api.list_tests().await;
 
     match result {
@@ -283,7 +284,7 @@ pub async fn get_synthetics_tests(ctx: Arc<DatadogClient>) -> anyhow::Result<Val
                 }
             }
 
-            let filepath = store_data(&data, "synthetics_tests").await?;
+            let filepath = store_data(&data, "synthetics_tests", ctx.output_format).await?;
 
             Ok(json!({
                 "filepath": filepath,
@@ -303,10 +304,10 @@ pub async fn get_synthetics_tests(ctx: Arc<DatadogClient>) -> anyhow::Result<Val
     }
 }
 
-pub async fn get_synthetics_locations(ctx: Arc<DatadogClient>) -> anyhow::Result<Value> {
+pub async fn get_synthetics_locations(ctx: ToolContext) -> anyhow::Result<Value> {
     info!("Getting Synthetics locations");
 
-    let api = SyntheticsApi::new((*ctx).clone());
+    let api = SyntheticsApi::new((*ctx.client).clone());
     let result = api.list_locations().await;
 
     match result {
@@ -341,7 +342,7 @@ pub async fn get_synthetics_locations(ctx: Arc<DatadogClient>) -> anyhow::Result
                 .map(|loc| loc.id.clone())
                 .collect();
 
-            let filepath = store_data(&data, "synthetics_locations").await?;
+            let filepath = store_data(&data, "synthetics_locations", ctx.output_format).await?;
 
             Ok(json!({
                 "filepath": filepath,
@@ -371,7 +372,7 @@ pub async fn get_synthetics_locations(ctx: Arc<DatadogClient>) -> anyhow::Result
 
 #[allow(clippy::too_many_arguments)]
 pub async fn create_synthetics_test(
-    ctx: Arc<DatadogClient>,
+    ctx: ToolContext,
     name: String,
     test_type: String,
     url: String,
@@ -433,12 +434,12 @@ pub async fn create_synthetics_test(
         status: Some("live".to_string()),
     };
 
-    let api = SyntheticsApi::new((*ctx).clone());
+    let api = SyntheticsApi::new((*ctx.client).clone());
     let result = api.create_test(&request).await;
 
     match result {
         Ok(data) => {
-            let filepath = store_data(&data, "synthetics_test_created").await?;
+            let filepath = store_data(&data, "synthetics_test_created", ctx.output_format).await?;
             info!(
                 "Created Synthetics test: {} (ID: {})",
                 data.name, data.public_id
@@ -466,7 +467,7 @@ pub async fn create_synthetics_test(
 
 #[allow(clippy::too_many_arguments)]
 pub async fn update_synthetics_test(
-    ctx: Arc<DatadogClient>,
+    ctx: ToolContext,
     public_id: String,
     name: Option<String>,
     url: Option<String>,
@@ -479,7 +480,7 @@ pub async fn update_synthetics_test(
 
     info!("Updating Synthetics test: {}", public_id);
 
-    let api = SyntheticsApi::new((*ctx).clone());
+    let api = SyntheticsApi::new((*ctx.client).clone());
 
     // Get the existing test
     let existing = api.get_test(&public_id).await.map_err(|e| {
@@ -525,7 +526,7 @@ pub async fn update_synthetics_test(
 
     match result {
         Ok(data) => {
-            let filepath = store_data(&data, "synthetics_test_updated").await?;
+            let filepath = store_data(&data, "synthetics_test_updated", ctx.output_format).await?;
             info!("Updated Synthetics test: {} (ID: {})", data.name, data.public_id);
 
             Ok(json!({
@@ -547,7 +548,7 @@ pub async fn update_synthetics_test(
 }
 
 pub async fn trigger_synthetics_tests(
-    ctx: Arc<DatadogClient>,
+    ctx: ToolContext,
     test_ids: Vec<String>,
 ) -> anyhow::Result<Value> {
     info!("Triggering {} Synthetics test(s)", test_ids.len());
@@ -559,12 +560,12 @@ pub async fn trigger_synthetics_tests(
         }));
     }
 
-    let api = SyntheticsApi::new((*ctx).clone());
+    let api = SyntheticsApi::new((*ctx.client).clone());
     let result = api.trigger_tests(test_ids.clone()).await;
 
     match result {
         Ok(data) => {
-            let filepath = store_data(&data, "synthetics_tests_triggered").await?;
+            let filepath = store_data(&data, "synthetics_tests_triggered", ctx.output_format).await?;
             info!(
                 "Triggered {} test(s), {} check(s) started",
                 test_ids.len(),
@@ -598,10 +599,10 @@ pub async fn trigger_synthetics_tests(
 // SECURITY & INCIDENTS TOOLS
 // ============================================================================
 
-pub async fn get_security_rules(ctx: Arc<DatadogClient>) -> anyhow::Result<Value> {
+pub async fn get_security_rules(ctx: ToolContext) -> anyhow::Result<Value> {
     info!("Getting security monitoring rules");
 
-    let api = SecurityApi::new((*ctx).clone());
+    let api = SecurityApi::new((*ctx.client).clone());
     let result = api.list_security_rules().await;
 
     match result {
@@ -618,7 +619,7 @@ pub async fn get_security_rules(ctx: Arc<DatadogClient>) -> anyhow::Result<Value
                 })
                 .count();
 
-            let filepath = store_data(&data, "security_rules").await?;
+            let filepath = store_data(&data, "security_rules", ctx.output_format).await?;
 
             Ok(json!({
                 "filepath": filepath,
@@ -640,12 +641,12 @@ pub async fn get_security_rules(ctx: Arc<DatadogClient>) -> anyhow::Result<Value
 }
 
 pub async fn get_incidents(
-    ctx: Arc<DatadogClient>,
+    ctx: ToolContext,
     page_size: Option<i32>,
 ) -> anyhow::Result<Value> {
     info!("Getting incidents");
 
-    let api = IncidentsApi::new((*ctx).clone());
+    let api = IncidentsApi::new((*ctx.client).clone());
     let result = api.list_all_incidents(page_size.unwrap_or(25)).await;
 
     match result {
@@ -660,7 +661,7 @@ pub async fn get_incidents(
                 }
             }
 
-            let filepath = store_data(&incidents, "incidents").await?;
+            let filepath = store_data(&incidents, "incidents", ctx.output_format).await?;
             info!("Retrieved {} incidents", incidents.len());
 
             Ok(json!({
@@ -682,16 +683,16 @@ pub async fn get_incidents(
     }
 }
 
-pub async fn get_slos(ctx: Arc<DatadogClient>) -> anyhow::Result<Value> {
+pub async fn get_slos(ctx: ToolContext) -> anyhow::Result<Value> {
     info!("Getting Service Level Objectives");
 
-    let api = SLOsApi::new((*ctx).clone());
+    let api = SLOsApi::new((*ctx.client).clone());
     let result = api.list_slos().await;
 
     match result {
         Ok(data) => {
             let slos = data.data.as_ref().map(|s| s.len()).unwrap_or(0);
-            let filepath = store_data(&data, "slos").await?;
+            let filepath = store_data(&data, "slos", ctx.output_format).await?;
 
             Ok(json!({
                 "filepath": filepath,
@@ -710,16 +711,16 @@ pub async fn get_slos(ctx: Arc<DatadogClient>) -> anyhow::Result<Value> {
     }
 }
 
-pub async fn get_notebooks(ctx: Arc<DatadogClient>) -> anyhow::Result<Value> {
+pub async fn get_notebooks(ctx: ToolContext) -> anyhow::Result<Value> {
     info!("Getting Datadog notebooks");
 
-    let api = NotebooksApi::new((*ctx).clone());
+    let api = NotebooksApi::new((*ctx.client).clone());
     let result = api.list_notebooks().await;
 
     match result {
         Ok(data) => {
             let notebooks = data.data.as_ref().map(|n| n.len()).unwrap_or(0);
-            let filepath = store_data(&data, "notebooks").await?;
+            let filepath = store_data(&data, "notebooks", ctx.output_format).await?;
 
             Ok(json!({
                 "filepath": filepath,
@@ -742,16 +743,16 @@ pub async fn get_notebooks(ctx: Arc<DatadogClient>) -> anyhow::Result<Value> {
 // TEAMS & USERS TOOLS
 // ============================================================================
 
-pub async fn get_teams(ctx: Arc<DatadogClient>) -> anyhow::Result<Value> {
+pub async fn get_teams(ctx: ToolContext) -> anyhow::Result<Value> {
     info!("Getting teams");
 
-    let api = TeamsApi::new((*ctx).clone());
+    let api = TeamsApi::new((*ctx.client).clone());
     let result = api.list_teams().await;
 
     match result {
         Ok(data) => {
             let teams = data.data.as_ref().map(|t| t.len()).unwrap_or(0);
-            let filepath = store_data(&data, "teams").await?;
+            let filepath = store_data(&data, "teams", ctx.output_format).await?;
 
             Ok(json!({
                 "filepath": filepath,
@@ -770,16 +771,16 @@ pub async fn get_teams(ctx: Arc<DatadogClient>) -> anyhow::Result<Value> {
     }
 }
 
-pub async fn get_users(ctx: Arc<DatadogClient>) -> anyhow::Result<Value> {
+pub async fn get_users(ctx: ToolContext) -> anyhow::Result<Value> {
     info!("Getting users");
 
-    let api = UsersApi::new((*ctx).clone());
+    let api = UsersApi::new((*ctx.client).clone());
     let result = api.list_users().await;
 
     match result {
         Ok(data) => {
             let users = data.users.as_ref().map(|u| u.len()).unwrap_or(0);
-            let filepath = store_data(&data, "users").await?;
+            let filepath = store_data(&data, "users", ctx.output_format).await?;
 
             Ok(json!({
                 "filepath": filepath,
@@ -1010,7 +1011,7 @@ fn analyze_trends(data: &Value) -> Value {
 // ============================================================================
 
 pub async fn get_kubernetes_deployments(
-    ctx: Arc<DatadogClient>,
+    ctx: ToolContext,
     namespace: Option<String>,
 ) -> anyhow::Result<Value> {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1042,7 +1043,7 @@ pub async fn get_kubernetes_deployments(
     );
 
     // Use existing metrics API
-    let api = MetricsApi::new((*ctx).clone());
+    let api = MetricsApi::new((*ctx.client).clone());
     let result = api.query_metrics(from_ts, to_ts, &query).await;
 
     match result {
@@ -1094,7 +1095,7 @@ pub async fn get_kubernetes_deployments(
             let mut namespace_list: Vec<String> = unique_namespaces.into_iter().collect();
             namespace_list.sort();
 
-            let filepath = store_data(&data, "kubernetes_deployments").await?;
+            let filepath = store_data(&data, "kubernetes_deployments", ctx.output_format).await?;
 
             Ok(json!({
                 "filepath": filepath,

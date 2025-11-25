@@ -1,18 +1,18 @@
 use crate::cache::store_data;
-use datadog_api::{apis::*, models::*, DatadogClient};
+use crate::state::ToolContext;
+use datadog_api::{apis::*, models::*};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::sync::Arc;
 use tracing::{error, info};
 
 // ============================================================================
 // METRICS & MONITORING TOOLS
 // ============================================================================
 
-pub async fn validate_api_key(ctx: Arc<DatadogClient>) -> anyhow::Result<Value> {
+pub async fn validate_api_key(ctx: ToolContext) -> anyhow::Result<Value> {
     info!("Validating API credentials");
 
-    let api = MonitorsApi::new((*ctx).clone());
+    let api = MonitorsApi::new((*ctx.client).clone());
     let result = api.list_monitors_with_page_size(1).await;
 
     match result {
@@ -21,7 +21,7 @@ pub async fn validate_api_key(ctx: Arc<DatadogClient>) -> anyhow::Result<Value> 
             Ok(json!({
                 "valid": true,
                 "summary": "API credentials are valid and working",
-                "site": ctx.config().site,
+                "site": ctx.client.config().site,
                 "test_successful": true,
                 "status": "success",
             }))
@@ -31,7 +31,7 @@ pub async fn validate_api_key(ctx: Arc<DatadogClient>) -> anyhow::Result<Value> 
             Ok(json!({
                 "valid": false,
                 "error": format!("API validation failed: {}", e),
-                "site": ctx.config().site,
+                "site": ctx.client.config().site,
                 "status": "error",
             }))
         }
@@ -39,14 +39,14 @@ pub async fn validate_api_key(ctx: Arc<DatadogClient>) -> anyhow::Result<Value> 
 }
 
 pub async fn get_metrics(
-    ctx: Arc<DatadogClient>,
+    ctx: ToolContext,
     query: String,
     from_timestamp: i64,
     to_timestamp: i64,
 ) -> anyhow::Result<Value> {
     info!("Querying metrics: {}", query);
 
-    let api = MetricsApi::new((*ctx).clone());
+    let api = MetricsApi::new((*ctx.client).clone());
     let result = api
         .query_metrics(from_timestamp, to_timestamp, &query)
         .await;
@@ -60,7 +60,7 @@ pub async fn get_metrics(
                 .map(|s| s.pointlist.as_ref().map(|p| p.len()).unwrap_or(0))
                 .sum();
 
-            let filepath = store_data(&data, "metrics").await?;
+            let filepath = store_data(&data, "metrics", ctx.output_format).await?;
             info!(
                 "Retrieved {} metric series with {} data points",
                 series_count, total_points
@@ -86,10 +86,10 @@ pub async fn get_metrics(
     }
 }
 
-pub async fn search_metrics(ctx: Arc<DatadogClient>, query: String) -> anyhow::Result<Value> {
+pub async fn search_metrics(ctx: ToolContext, query: String) -> anyhow::Result<Value> {
     info!("Searching metrics: {}", query);
 
-    let api = MetricsApi::new((*ctx).clone());
+    let api = MetricsApi::new((*ctx.client).clone());
     let result = api.list_metrics(&query).await;
 
     match result {
@@ -98,7 +98,7 @@ pub async fn search_metrics(ctx: Arc<DatadogClient>, query: String) -> anyhow::R
             let sample_metrics: Vec<_> = metrics.iter().take(10).cloned().collect();
             let metric_count = metrics.len();
 
-            let filepath = store_data(&data, "metrics_search").await?;
+            let filepath = store_data(&data, "metrics_search", ctx.output_format).await?;
             info!("Found {} metrics matching '{}'", metric_count, query);
 
             Ok(json!({
@@ -120,17 +120,17 @@ pub async fn search_metrics(ctx: Arc<DatadogClient>, query: String) -> anyhow::R
 }
 
 pub async fn get_metric_metadata(
-    ctx: Arc<DatadogClient>,
+    ctx: ToolContext,
     metric_name: String,
 ) -> anyhow::Result<Value> {
     info!("Getting metadata for metric: {}", metric_name);
 
-    let api = MetricsApi::new((*ctx).clone());
+    let api = MetricsApi::new((*ctx.client).clone());
     let result = api.get_metric_metadata(&metric_name).await;
 
     match result {
         Ok(data) => {
-            let filepath = store_data(&data, "metric_metadata").await?;
+            let filepath = store_data(&data, "metric_metadata", ctx.output_format).await?;
 
             Ok(json!({
                 "filepath": filepath,
@@ -152,10 +152,10 @@ pub async fn get_metric_metadata(
     }
 }
 
-pub async fn get_monitors(ctx: Arc<DatadogClient>) -> anyhow::Result<Value> {
+pub async fn get_monitors(ctx: ToolContext) -> anyhow::Result<Value> {
     info!("Getting all monitors");
 
-    let api = MonitorsApi::new((*ctx).clone());
+    let api = MonitorsApi::new((*ctx.client).clone());
     let result = api.list_monitors().await;
 
     match result {
@@ -168,7 +168,7 @@ pub async fn get_monitors(ctx: Arc<DatadogClient>) -> anyhow::Result<Value> {
                 }
             }
 
-            let filepath = store_data(&data, "monitors").await?;
+            let filepath = store_data(&data, "monitors", ctx.output_format).await?;
             info!("Retrieved {} monitors", data.len());
 
             Ok(json!({
@@ -190,15 +190,15 @@ pub async fn get_monitors(ctx: Arc<DatadogClient>) -> anyhow::Result<Value> {
     }
 }
 
-pub async fn get_monitor(ctx: Arc<DatadogClient>, monitor_id: i64) -> anyhow::Result<Value> {
+pub async fn get_monitor(ctx: ToolContext, monitor_id: i64) -> anyhow::Result<Value> {
     info!("Getting monitor: {}", monitor_id);
 
-    let api = MonitorsApi::new((*ctx).clone());
+    let api = MonitorsApi::new((*ctx.client).clone());
     let result = api.get_monitor(monitor_id).await;
 
     match result {
         Ok(data) => {
-            let filepath = store_data(&data, "monitor").await?;
+            let filepath = store_data(&data, "monitor", ctx.output_format).await?;
 
             Ok(json!({
                 "filepath": filepath,
@@ -223,7 +223,7 @@ pub async fn get_monitor(ctx: Arc<DatadogClient>, monitor_id: i64) -> anyhow::Re
 }
 
 pub async fn create_monitor(
-    ctx: Arc<DatadogClient>,
+    ctx: ToolContext,
     name: String,
     monitor_type: String,
     query: String,
@@ -243,12 +243,12 @@ pub async fn create_monitor(
         options: monitor_options,
     };
 
-    let api = MonitorsApi::new((*ctx).clone());
+    let api = MonitorsApi::new((*ctx.client).clone());
     let result = api.create_monitor(&request).await;
 
     match result {
         Ok(data) => {
-            let filepath = store_data(&data, "monitor_created").await?;
+            let filepath = store_data(&data, "monitor_created", ctx.output_format).await?;
             info!("Created monitor: {} (ID: {:?})", name, data.id);
 
             Ok(json!({
@@ -270,7 +270,7 @@ pub async fn create_monitor(
 }
 
 pub async fn update_monitor(
-    ctx: Arc<DatadogClient>,
+    ctx: ToolContext,
     monitor_id: i64,
     name: Option<String>,
     query: Option<String>,
@@ -289,12 +289,12 @@ pub async fn update_monitor(
         options: monitor_options,
     };
 
-    let api = MonitorsApi::new((*ctx).clone());
+    let api = MonitorsApi::new((*ctx.client).clone());
     let result = api.update_monitor(monitor_id, &request).await;
 
     match result {
         Ok(data) => {
-            let filepath = store_data(&data, "monitor_updated").await?;
+            let filepath = store_data(&data, "monitor_updated", ctx.output_format).await?;
             info!("Updated monitor: {:?} (ID: {:?})", data.name, data.id);
 
             Ok(json!({
@@ -315,10 +315,10 @@ pub async fn update_monitor(
     }
 }
 
-pub async fn delete_monitor(ctx: Arc<DatadogClient>, monitor_id: i64) -> anyhow::Result<Value> {
+pub async fn delete_monitor(ctx: ToolContext, monitor_id: i64) -> anyhow::Result<Value> {
     info!("Deleting monitor: {}", monitor_id);
 
-    let api = MonitorsApi::new((*ctx).clone());
+    let api = MonitorsApi::new((*ctx.client).clone());
     let result = api.delete_monitor(monitor_id).await;
 
     match result {
@@ -344,10 +344,10 @@ pub async fn delete_monitor(ctx: Arc<DatadogClient>, monitor_id: i64) -> anyhow:
 // DASHBOARD TOOLS
 // ============================================================================
 
-pub async fn get_dashboards(ctx: Arc<DatadogClient>) -> anyhow::Result<Value> {
+pub async fn get_dashboards(ctx: ToolContext) -> anyhow::Result<Value> {
     info!("Getting all dashboards");
 
-    let api = DashboardsApi::new((*ctx).clone());
+    let api = DashboardsApi::new((*ctx.client).clone());
     let result = api.list_dashboards().await;
 
     match result {
@@ -360,7 +360,7 @@ pub async fn get_dashboards(ctx: Arc<DatadogClient>) -> anyhow::Result<Value> {
                 .collect();
             let dashboard_count = dashboards.len();
 
-            let filepath = store_data(&data, "dashboards").await?;
+            let filepath = store_data(&data, "dashboards", ctx.output_format).await?;
             info!("Retrieved {} dashboards", dashboard_count);
 
             Ok(json!({
@@ -381,16 +381,16 @@ pub async fn get_dashboards(ctx: Arc<DatadogClient>) -> anyhow::Result<Value> {
     }
 }
 
-pub async fn get_dashboard(ctx: Arc<DatadogClient>, dashboard_id: String) -> anyhow::Result<Value> {
+pub async fn get_dashboard(ctx: ToolContext, dashboard_id: String) -> anyhow::Result<Value> {
     info!("Getting dashboard: {}", dashboard_id);
 
-    let api = DashboardsApi::new((*ctx).clone());
+    let api = DashboardsApi::new((*ctx.client).clone());
     let result = api.get_dashboard(&dashboard_id).await;
 
     match result {
         Ok(data) => {
             let widgets = data.widgets.as_ref().map(|w| w.len()).unwrap_or(0);
-            let filepath = store_data(&data, "dashboard").await?;
+            let filepath = store_data(&data, "dashboard", ctx.output_format).await?;
 
             Ok(json!({
                 "filepath": filepath,
@@ -416,7 +416,7 @@ pub async fn get_dashboard(ctx: Arc<DatadogClient>, dashboard_id: String) -> any
 }
 
 pub async fn create_dashboard(
-    ctx: Arc<DatadogClient>,
+    ctx: ToolContext,
     title: String,
     layout_type: String,
     widgets: Vec<Value>,
@@ -435,12 +435,12 @@ pub async fn create_dashboard(
         template_variables: None,
     };
 
-    let api = DashboardsApi::new((*ctx).clone());
+    let api = DashboardsApi::new((*ctx.client).clone());
     let result = api.create_dashboard(&dashboard).await;
 
     match result {
         Ok(data) => {
-            let filepath = store_data(&data, "dashboard_created").await?;
+            let filepath = store_data(&data, "dashboard_created", ctx.output_format).await?;
             info!("Created dashboard: {:?} (ID: {:?})", data.title, data.id);
 
             Ok(json!({
@@ -462,14 +462,14 @@ pub async fn create_dashboard(
 }
 
 pub async fn update_dashboard(
-    ctx: Arc<DatadogClient>,
+    ctx: ToolContext,
     dashboard_id: String,
     title: Option<String>,
     widgets: Option<Vec<Value>>,
 ) -> anyhow::Result<Value> {
     info!("Updating dashboard: {}", dashboard_id);
 
-    let api = DashboardsApi::new((*ctx).clone());
+    let api = DashboardsApi::new((*ctx.client).clone());
 
     // Get existing dashboard first
     let existing = api.get_dashboard(&dashboard_id).await?;
@@ -491,7 +491,7 @@ pub async fn update_dashboard(
 
     match result {
         Ok(data) => {
-            let filepath = store_data(&data, "dashboard_updated").await?;
+            let filepath = store_data(&data, "dashboard_updated", ctx.output_format).await?;
             info!("Updated dashboard: {:?} (ID: {:?})", data.title, data.id);
 
             Ok(json!({
@@ -513,12 +513,12 @@ pub async fn update_dashboard(
 }
 
 pub async fn delete_dashboard(
-    ctx: Arc<DatadogClient>,
+    ctx: ToolContext,
     dashboard_id: String,
 ) -> anyhow::Result<Value> {
     info!("Deleting dashboard: {}", dashboard_id);
 
-    let api = DashboardsApi::new((*ctx).clone());
+    let api = DashboardsApi::new((*ctx.client).clone());
     let result = api.delete_dashboard(&dashboard_id).await;
 
     match result {

@@ -36,3 +36,6 @@ schemars = { version = "0.8", features = ["derive"] }
 
 # TOON format for token-efficient LLM output
 toon = { path = "/Users/js/code/3rd/toon/toon-rs/crates/toon" }
+
+[dev-dependencies]
+tempfile = "3.10"

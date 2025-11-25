@@ -40,6 +40,9 @@ pub struct DatadogConfig {
     /// List of unstable operations that require the DD-OPERATION-UNSTABLE header
     #[serde(default = "default_unstable_operations")]
     pub unstable_operations: Vec<String>,
+    /// Override base URL (for testing with mock servers)
+    #[serde(skip)]
+    base_url_override: Option<String>,
 }
 
 const fn default_site_const() -> &'static str {
@@ -68,6 +71,7 @@ impl DatadogConfig {
             site: default_site(),
             retry_config: RetryConfig::default(),
             unstable_operations: default_unstable_operations(),
+            base_url_override: None,
         }
     }
 
@@ -85,10 +89,19 @@ impl DatadogConfig {
         self
     }
 
+    /// Sets a custom base URL (for testing with mock servers).
+    #[must_use]
+    pub fn with_base_url(mut self, base_url: String) -> Self {
+        self.base_url_override = Some(base_url);
+        self
+    }
+
     /// Returns the full API base URL for the configured Datadog site.
     #[must_use]
     pub fn base_url(&self) -> String {
-        format!("https://api.{}", self.site)
+        self.base_url_override
+            .clone()
+            .unwrap_or_else(|| format!("https://api.{}", self.site))
     }
 
     /// Creates a configuration from environment variables.
@@ -117,6 +130,7 @@ impl DatadogConfig {
             site,
             retry_config: RetryConfig::default(),
             unstable_operations: default_unstable_operations(),
+            base_url_override: None,
         })
     }
 }
@@ -125,6 +139,7 @@ impl DatadogConfig {
 mod tests {
     use crate::Error;
     use super::*;
+    use serial_test::serial;
     use std::env;
 
     #[test]
@@ -172,6 +187,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_from_env_success() {
         env::set_var("DD_API_KEY", "env_api_key");
         env::set_var("DD_APP_KEY", "env_app_key");
@@ -189,6 +205,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_from_env_default_site() {
         env::set_var("DD_API_KEY", "env_api_key");
         env::set_var("DD_APP_KEY", "env_app_key");
@@ -203,6 +220,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_from_env_missing_api_key() {
         env::remove_var("DD_API_KEY");
         env::set_var("DD_APP_KEY", "env_app_key");
@@ -220,6 +238,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_from_env_missing_app_key() {
         env::set_var("DD_API_KEY", "env_api_key");
         env::remove_var("DD_APP_KEY");

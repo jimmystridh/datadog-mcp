@@ -1,9 +1,9 @@
 use crate::cache::{cleanup_cache, load_data, store_data};
+use crate::response::tool_error;
 use crate::state::ToolContext;
 use datadog_api::{apis::*, models::*};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-
 use tracing::{error, info};
 
 // ============================================================================
@@ -49,13 +49,7 @@ pub async fn search_logs(
                 "status": "success",
             }))
         }
-        Err(e) => {
-            error!("Failed to search logs: {}", e);
-            Ok(json!({
-                "error": format!("Failed to search logs: {}", e),
-                "status": "error",
-            }))
-        }
+        Err(e) => Ok(tool_error("Failed to search logs", e)),
     }
 }
 
@@ -89,13 +83,7 @@ pub async fn get_events(
                 "status": "success",
             }))
         }
-        Err(e) => {
-            error!("Failed to get events: {}", e);
-            Ok(json!({
-                "error": format!("Failed to get events: {}", e),
-                "status": "error",
-            }))
-        }
+        Err(e) => Ok(tool_error("Failed to get events", e)),
     }
 }
 
@@ -127,13 +115,7 @@ pub async fn get_infrastructure(ctx: ToolContext) -> anyhow::Result<Value> {
                 "status": "success",
             }))
         }
-        Err(e) => {
-            error!("Failed to get infrastructure: {}", e);
-            Ok(json!({
-                "error": format!("Failed to get infrastructure: {}", e),
-                "status": "error",
-            }))
-        }
+        Err(e) => Ok(tool_error("Failed to get infrastructure", e)),
     }
 }
 
@@ -156,13 +138,7 @@ pub async fn get_tags(ctx: ToolContext, source: Option<String>) -> anyhow::Resul
                 "status": "success",
             }))
         }
-        Err(e) => {
-            error!("Failed to get tags: {}", e);
-            Ok(json!({
-                "error": format!("Failed to get tags: {}", e),
-                "status": "error",
-            }))
-        }
+        Err(e) => Ok(tool_error("Failed to get tags", e)),
     }
 }
 
@@ -185,13 +161,7 @@ pub async fn get_downtimes(ctx: ToolContext) -> anyhow::Result<Value> {
                 "status": "success",
             }))
         }
-        Err(e) => {
-            error!("Failed to get downtimes: {}", e);
-            Ok(json!({
-                "error": format!("Failed to get downtimes: {}", e),
-                "status": "error",
-            }))
-        }
+        Err(e) => Ok(tool_error("Failed to get downtimes", e)),
     }
 }
 
@@ -227,13 +197,7 @@ pub async fn create_downtime(
                 "status": "created",
             }))
         }
-        Err(e) => {
-            error!("Failed to create downtime: {}", e);
-            Ok(json!({
-                "error": format!("Failed to create downtime: {}", e),
-                "status": "error",
-            }))
-        }
+        Err(e) => Ok(tool_error("Failed to create downtime", e)),
     }
 }
 
@@ -252,13 +216,7 @@ pub async fn cancel_downtime(ctx: ToolContext, downtime_id: i64) -> anyhow::Resu
                 "status": "cancelled"
             }))
         }
-        Err(e) => {
-            error!("Failed to cancel downtime: {}", e);
-            Ok(json!({
-                "error": format!("Failed to cancel downtime: {}", e),
-                "status": "error",
-            }))
-        }
+        Err(e) => Ok(tool_error("Failed to cancel downtime", e)),
     }
 }
 
@@ -294,13 +252,7 @@ pub async fn get_synthetics_tests(ctx: ToolContext) -> anyhow::Result<Value> {
                 "status": "success",
             }))
         }
-        Err(e) => {
-            error!("Failed to get Synthetics tests: {}", e);
-            Ok(json!({
-                "error": format!("Failed to get Synthetics tests: {}", e),
-                "status": "error",
-            }))
-        }
+        Err(e) => Ok(tool_error("Failed to get Synthetics tests", e)),
     }
 }
 
@@ -360,13 +312,7 @@ pub async fn get_synthetics_locations(ctx: ToolContext) -> anyhow::Result<Value>
                 "status": "success",
             }))
         }
-        Err(e) => {
-            error!("Failed to get Synthetics locations: {}", e);
-            Ok(json!({
-                "error": format!("Failed to get Synthetics locations: {}", e),
-                "status": "error",
-            }))
-        }
+        Err(e) => Ok(tool_error("Failed to get Synthetics locations", e)),
     }
 }
 
@@ -455,13 +401,7 @@ pub async fn create_synthetics_test(
                 "url": url,
             }))
         }
-        Err(e) => {
-            error!("Failed to create Synthetics test: {}", e);
-            Ok(json!({
-                "error": format!("Failed to create Synthetics test: {}", e),
-                "status": "error",
-            }))
-        }
+        Err(e) => Ok(tool_error("Failed to create Synthetics test", e)),
     }
 }
 
@@ -537,13 +477,7 @@ pub async fn update_synthetics_test(
                 "status": data.status,
             }))
         }
-        Err(e) => {
-            error!("Failed to update Synthetics test: {}", e);
-            Ok(json!({
-                "error": format!("Failed to update Synthetics test: {}", e),
-                "status": "error",
-            }))
-        }
+        Err(e) => Ok(tool_error("Failed to update Synthetics test", e)),
     }
 }
 
@@ -585,13 +519,7 @@ pub async fn trigger_synthetics_tests(
                 "status": "success",
             }))
         }
-        Err(e) => {
-            error!("Failed to trigger Synthetics tests: {}", e);
-            Ok(json!({
-                "error": format!("Failed to trigger Synthetics tests: {}", e),
-                "status": "error",
-            }))
-        }
+        Err(e) => Ok(tool_error("Failed to trigger Synthetics tests", e)),
     }
 }
 
@@ -630,13 +558,7 @@ pub async fn get_security_rules(ctx: ToolContext) -> anyhow::Result<Value> {
                 "status": "success",
             }))
         }
-        Err(e) => {
-            error!("Failed to get security rules: {}", e);
-            Ok(json!({
-                "error": format!("Failed to get security rules: {}", e),
-                "status": "error",
-            }))
-        }
+        Err(e) => Ok(tool_error("Failed to get security rules", e)),
     }
 }
 
@@ -673,13 +595,7 @@ pub async fn get_incidents(
                 "status": "success",
             }))
         }
-        Err(e) => {
-            error!("Failed to get incidents: {}", e);
-            Ok(json!({
-                "error": format!("Failed to get incidents: {}", e),
-                "status": "error",
-            }))
-        }
+        Err(e) => Ok(tool_error("Failed to get incidents", e)),
     }
 }
 
@@ -701,13 +617,7 @@ pub async fn get_slos(ctx: ToolContext) -> anyhow::Result<Value> {
                 "status": "success",
             }))
         }
-        Err(e) => {
-            error!("Failed to get SLOs: {}", e);
-            Ok(json!({
-                "error": format!("Failed to get SLOs: {}", e),
-                "status": "error",
-            }))
-        }
+        Err(e) => Ok(tool_error("Failed to get SLOs", e)),
     }
 }
 
@@ -729,13 +639,7 @@ pub async fn get_notebooks(ctx: ToolContext) -> anyhow::Result<Value> {
                 "status": "success",
             }))
         }
-        Err(e) => {
-            error!("Failed to get notebooks: {}", e);
-            Ok(json!({
-                "error": format!("Failed to get notebooks: {}", e),
-                "status": "error",
-            }))
-        }
+        Err(e) => Ok(tool_error("Failed to get notebooks", e)),
     }
 }
 
@@ -761,13 +665,7 @@ pub async fn get_teams(ctx: ToolContext) -> anyhow::Result<Value> {
                 "status": "success",
             }))
         }
-        Err(e) => {
-            error!("Failed to get teams: {}", e);
-            Ok(json!({
-                "error": format!("Failed to get teams: {}", e),
-                "status": "error",
-            }))
-        }
+        Err(e) => Ok(tool_error("Failed to get teams", e)),
     }
 }
 
@@ -789,13 +687,7 @@ pub async fn get_users(ctx: ToolContext) -> anyhow::Result<Value> {
                 "status": "success",
             }))
         }
-        Err(e) => {
-            error!("Failed to get users: {}", e);
-            Ok(json!({
-                "error": format!("Failed to get users: {}", e),
-                "status": "error",
-            }))
-        }
+        Err(e) => Ok(tool_error("Failed to get users", e)),
     }
 }
 
@@ -851,13 +743,7 @@ pub async fn cleanup_cache_tool(older_than_hours: Option<u64>) -> anyhow::Result
                 "status": "success",
             }))
         }
-        Err(e) => {
-            error!("Failed to cleanup cache: {}", e);
-            Ok(json!({
-                "error": format!("Failed to cleanup cache: {}", e),
-                "status": "error",
-            }))
-        }
+        Err(e) => Ok(tool_error("Failed to cleanup cache", e)),
     }
 }
 
@@ -1110,12 +996,6 @@ pub async fn get_kubernetes_deployments(
                 "status": "success",
             }))
         }
-        Err(e) => {
-            error!("Failed to get Kubernetes deployments: {}", e);
-            Ok(json!({
-                "error": format!("Failed to get Kubernetes deployments: {}", e),
-                "status": "error",
-            }))
-        }
+        Err(e) => Ok(tool_error("Failed to get Kubernetes deployments", e)),
     }
 }

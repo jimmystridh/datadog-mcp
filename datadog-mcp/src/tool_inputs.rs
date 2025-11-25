@@ -244,3 +244,153 @@ pub struct CleanupCacheInput {
     #[schemars(description = "Delete files older than this many hours")]
     pub older_than_hours: Option<u64>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use schemars::schema_for;
+
+    #[test]
+    fn test_get_metrics_input_serialization() {
+        let input = GetMetricsInput {
+            query: "avg:system.cpu.user{*}".to_string(),
+            from_timestamp: 1700000000,
+            to_timestamp: 1700003600,
+        };
+
+        let json = serde_json::to_string(&input).unwrap();
+        let deserialized: GetMetricsInput = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.query, "avg:system.cpu.user{*}");
+        assert_eq!(deserialized.from_timestamp, 1700000000);
+        assert_eq!(deserialized.to_timestamp, 1700003600);
+    }
+
+    #[test]
+    fn test_create_monitor_input_with_options() {
+        let json = r#"{
+            "name": "CPU Alert",
+            "monitor_type": "metric alert",
+            "query": "avg:system.cpu.user{*} > 80",
+            "message": "CPU is high!",
+            "options": {"notify_no_data": true}
+        }"#;
+
+        let input: CreateMonitorInput = serde_json::from_str(json).unwrap();
+
+        assert_eq!(input.name, "CPU Alert");
+        assert_eq!(input.monitor_type, "metric alert");
+        assert!(input.options.is_some());
+    }
+
+    #[test]
+    fn test_create_monitor_input_minimal() {
+        let json = r#"{
+            "name": "Test Monitor",
+            "monitor_type": "metric alert",
+            "query": "avg:test{*}"
+        }"#;
+
+        let input: CreateMonitorInput = serde_json::from_str(json).unwrap();
+
+        assert_eq!(input.name, "Test Monitor");
+        assert!(input.message.is_none());
+        assert!(input.options.is_none());
+    }
+
+    #[test]
+    fn test_search_logs_input_with_limit() {
+        let input = SearchLogsInput {
+            query: "service:api status:error".to_string(),
+            from_time: "now-15m".to_string(),
+            to_time: "now".to_string(),
+            limit: Some(100),
+        };
+
+        let json = serde_json::to_string(&input).unwrap();
+        assert!(json.contains("\"limit\":100"));
+    }
+
+    #[test]
+    fn test_create_synthetics_test_input() {
+        let input = CreateSyntheticsTestInput {
+            name: "API Health Check".to_string(),
+            test_type: "api".to_string(),
+            url: "https://api.example.com/health".to_string(),
+            locations: vec!["aws:eu-central-1".to_string()],
+            message: Some("API is down".to_string()),
+            tags: Some(vec!["env:prod".to_string()]),
+            tick_every: Some(300),
+        };
+
+        let json = serde_json::to_string(&input).unwrap();
+        let deserialized: CreateSyntheticsTestInput = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.locations.len(), 1);
+        assert_eq!(deserialized.tick_every, Some(300));
+    }
+
+    #[test]
+    fn test_update_synthetics_test_partial() {
+        let json = r#"{
+            "public_id": "abc-123-xyz",
+            "name": "Updated Name"
+        }"#;
+
+        let input: UpdateSyntheticsTestInput = serde_json::from_str(json).unwrap();
+
+        assert_eq!(input.public_id, "abc-123-xyz");
+        assert_eq!(input.name, Some("Updated Name".to_string()));
+        assert!(input.url.is_none());
+        assert!(input.locations.is_none());
+    }
+
+    #[test]
+    fn test_create_downtime_input() {
+        let input = CreateDowntimeInput {
+            scope: vec!["env:staging".to_string(), "service:api".to_string()],
+            start: Some(1700000000),
+            end: Some(1700003600),
+            message: Some("Maintenance window".to_string()),
+        };
+
+        let json = serde_json::to_string(&input).unwrap();
+        assert!(json.contains("\"scope\":["));
+        assert!(json.contains("env:staging"));
+    }
+
+    #[test]
+    fn test_schema_generation() {
+        let schema = schema_for!(CreateMonitorInput);
+        let json = serde_json::to_string_pretty(&schema).unwrap();
+
+        assert!(json.contains("\"name\""));
+        assert!(json.contains("\"monitor_type\""));
+        assert!(json.contains("\"query\""));
+    }
+
+    #[test]
+    fn test_get_kubernetes_deployments_input() {
+        let with_ns = GetKubernetesDeploymentsInput {
+            namespace: Some("production".to_string()),
+        };
+        let without_ns = GetKubernetesDeploymentsInput { namespace: None };
+
+        assert!(with_ns.namespace.is_some());
+        assert!(without_ns.namespace.is_none());
+    }
+
+    #[test]
+    fn test_analyze_data_input() {
+        let input = AnalyzeDataInput {
+            filepath: "/tmp/data.json".to_string(),
+            analysis_type: Some("summary".to_string()),
+        };
+
+        let json = serde_json::to_string(&input).unwrap();
+        let deserialized: AnalyzeDataInput = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.filepath, "/tmp/data.json");
+        assert_eq!(deserialized.analysis_type, Some("summary".to_string()));
+    }
+}

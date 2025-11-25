@@ -34,6 +34,7 @@ impl DatadogClient {
         let base_client = Client::builder()
             .timeout(Duration::from_secs(30))
             .pool_max_idle_per_host(10)
+            .gzip(true)
             .build()
             .map_err(Error::HttpError)?;
 
@@ -78,6 +79,11 @@ impl DatadogClient {
         headers.insert(
             header::USER_AGENT,
             header::HeaderValue::from_static("datadog-mcp/0.1.0"),
+        );
+
+        headers.insert(
+            header::ACCEPT_ENCODING,
+            header::HeaderValue::from_static("gzip"),
         );
 
         // Add unstable operation header if needed

@@ -1,4 +1,5 @@
 use crate::cache::store_data;
+use crate::response::tool_error;
 use crate::state::ToolContext;
 use datadog_api::{apis::*, models::*};
 use serde_json::{json, Value};
@@ -76,13 +77,7 @@ pub async fn get_metrics(
                 "status": "success",
             }))
         }
-        Err(e) => {
-            error!("Failed to get metrics: {}", e);
-            Ok(json!({
-                "error": format!("Failed to get metrics: {}", e),
-                "status": "error",
-            }))
-        }
+        Err(e) => Ok(tool_error("Failed to get metrics", e)),
     }
 }
 
@@ -109,13 +104,7 @@ pub async fn search_metrics(ctx: ToolContext, query: String) -> anyhow::Result<V
                 "status": "success",
             }))
         }
-        Err(e) => {
-            error!("Failed to search metrics: {}", e);
-            Ok(json!({
-                "error": format!("Failed to search metrics: {}", e),
-                "status": "error",
-            }))
-        }
+        Err(e) => Ok(tool_error("Failed to search metrics", e)),
     }
 }
 
@@ -142,13 +131,7 @@ pub async fn get_metric_metadata(
                 "status": "success",
             }))
         }
-        Err(e) => {
-            error!("Failed to get metric metadata: {}", e);
-            Ok(json!({
-                "error": format!("Failed to get metric metadata: {}", e),
-                "status": "error",
-            }))
-        }
+        Err(e) => Ok(tool_error("Failed to get metric metadata", e)),
     }
 }
 
@@ -180,13 +163,7 @@ pub async fn get_monitors(ctx: ToolContext) -> anyhow::Result<Value> {
                 "status": "success",
             }))
         }
-        Err(e) => {
-            error!("Failed to get monitors: {}", e);
-            Ok(json!({
-                "error": format!("Failed to get monitors: {}", e),
-                "status": "error",
-            }))
-        }
+        Err(e) => Ok(tool_error("Failed to get monitors", e)),
     }
 }
 
@@ -212,13 +189,7 @@ pub async fn get_monitor(ctx: ToolContext, monitor_id: i64) -> anyhow::Result<Va
                 "monitor_type": data.monitor_type,
             }))
         }
-        Err(e) => {
-            error!("Failed to get monitor {}: {}", monitor_id, e);
-            Ok(json!({
-                "error": format!("Failed to get monitor {}: {}", monitor_id, e),
-                "status": "error",
-            }))
-        }
+        Err(e) => Ok(tool_error(&format!("Failed to get monitor {}", monitor_id), e)),
     }
 }
 
@@ -259,13 +230,7 @@ pub async fn create_monitor(
                 "status": "created",
             }))
         }
-        Err(e) => {
-            error!("Failed to create monitor: {}", e);
-            Ok(json!({
-                "error": format!("Failed to create monitor: {}", e),
-                "status": "error",
-            }))
-        }
+        Err(e) => Ok(tool_error("Failed to create monitor", e)),
     }
 }
 
@@ -305,13 +270,7 @@ pub async fn update_monitor(
                 "status": "updated",
             }))
         }
-        Err(e) => {
-            error!("Failed to update monitor: {}", e);
-            Ok(json!({
-                "error": format!("Failed to update monitor: {}", e),
-                "status": "error",
-            }))
-        }
+        Err(e) => Ok(tool_error("Failed to update monitor", e)),
     }
 }
 
@@ -330,13 +289,7 @@ pub async fn delete_monitor(ctx: ToolContext, monitor_id: i64) -> anyhow::Result
                 "status": "deleted",
             }))
         }
-        Err(e) => {
-            error!("Failed to delete monitor: {}", e);
-            Ok(json!({
-                "error": format!("Failed to delete monitor: {}", e),
-                "status": "error",
-            }))
-        }
+        Err(e) => Ok(tool_error("Failed to delete monitor", e)),
     }
 }
 
@@ -371,13 +324,7 @@ pub async fn get_dashboards(ctx: ToolContext) -> anyhow::Result<Value> {
                 "status": "success",
             }))
         }
-        Err(e) => {
-            error!("Failed to get dashboards: {}", e);
-            Ok(json!({
-                "error": format!("Failed to get dashboards: {}", e),
-                "status": "error",
-            }))
-        }
+        Err(e) => Ok(tool_error("Failed to get dashboards", e)),
     }
 }
 
@@ -405,13 +352,7 @@ pub async fn get_dashboard(ctx: ToolContext, dashboard_id: String) -> anyhow::Re
                 "status": "success",
             }))
         }
-        Err(e) => {
-            error!("Failed to get dashboard {}: {}", dashboard_id, e);
-            Ok(json!({
-                "error": format!("Failed to get dashboard {}: {}", dashboard_id, e),
-                "status": "error",
-            }))
-        }
+        Err(e) => Ok(tool_error(&format!("Failed to get dashboard {}", dashboard_id), e)),
     }
 }
 
@@ -451,13 +392,7 @@ pub async fn create_dashboard(
                 "status": "created",
             }))
         }
-        Err(e) => {
-            error!("Failed to create dashboard: {}", e);
-            Ok(json!({
-                "error": format!("Failed to create dashboard: {}", e),
-                "status": "error",
-            }))
-        }
+        Err(e) => Ok(tool_error("Failed to create dashboard", e)),
     }
 }
 
@@ -502,13 +437,7 @@ pub async fn update_dashboard(
                 "status": "updated",
             }))
         }
-        Err(e) => {
-            error!("Failed to update dashboard: {}", e);
-            Ok(json!({
-                "error": format!("Failed to update dashboard: {}", e),
-                "status": "error",
-            }))
-        }
+        Err(e) => Ok(tool_error("Failed to update dashboard", e)),
     }
 }
 
@@ -530,13 +459,7 @@ pub async fn delete_dashboard(
                 "status": "deleted",
             }))
         }
-        Err(e) => {
-            error!("Failed to delete dashboard: {}", e);
-            Ok(json!({
-                "error": format!("Failed to delete dashboard: {}", e),
-                "status": "error",
-            }))
-        }
+        Err(e) => Ok(tool_error("Failed to delete dashboard", e)),
     }
 }
 

@@ -73,9 +73,7 @@ impl TracesApi {
     ///
     /// Returns an error if the API request fails.
     pub async fn search_traces(&self, query: &TraceQuery) -> Result<TraceSearchResponse> {
-        self.client
-            .get_with_query("/api/v2/traces", query)
-            .await
+        self.client.get_with_query("/api/v2/traces", query).await
     }
 
     /// Get a specific trace by ID.
@@ -112,7 +110,11 @@ impl TracesApi {
             end: i64,
         }
 
-        let params = QueryParams { service, start, end };
+        let params = QueryParams {
+            service,
+            start,
+            end,
+        };
 
         self.client
             .get_with_query("/api/v2/apm/stats", &params)
@@ -143,7 +145,11 @@ impl TracesApi {
             end: i64,
         }
 
-        let params = QueryParams { service, start, end };
+        let params = QueryParams {
+            service,
+            start,
+            end,
+        };
 
         self.client
             .get_with_query("/api/v2/apm/dependencies", &params)

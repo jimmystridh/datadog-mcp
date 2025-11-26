@@ -29,9 +29,7 @@ impl MonitorsApi {
 
         let params = QueryParams { page_size };
 
-        self.client
-            .get_with_query("/api/v1/monitor", &params)
-            .await
+        self.client.get_with_query("/api/v1/monitor", &params).await
     }
 
     pub async fn get_monitor(&self, monitor_id: i64) -> Result<Monitor> {

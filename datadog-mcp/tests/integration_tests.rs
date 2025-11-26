@@ -1,9 +1,4 @@
-use datadog_api::{
-    apis::*,
-    config::DatadogConfig,
-    models::*,
-    DatadogClient,
-};
+use datadog_api::{apis::*, config::DatadogConfig, models::*, DatadogClient};
 use serde_json::json;
 
 // ============================================================================
@@ -12,10 +7,7 @@ use serde_json::json;
 
 #[test]
 fn test_config_creation() {
-    let config = DatadogConfig::new(
-        "test_api_key".to_string(),
-        "test_app_key".to_string(),
-    );
+    let config = DatadogConfig::new("test_api_key".to_string(), "test_app_key".to_string());
 
     assert_eq!(config.api_key, "test_api_key");
     assert_eq!(config.app_key, "test_app_key");
@@ -25,11 +17,8 @@ fn test_config_creation() {
 
 #[test]
 fn test_config_with_site() {
-    let config = DatadogConfig::new(
-        "test_api_key".to_string(),
-        "test_app_key".to_string(),
-    )
-    .with_site("datadoghq.eu".to_string());
+    let config = DatadogConfig::new("test_api_key".to_string(), "test_app_key".to_string())
+        .with_site("datadoghq.eu".to_string());
 
     assert_eq!(config.site, "datadoghq.eu");
     assert_eq!(config.base_url(), "https://api.datadoghq.eu");
@@ -37,12 +26,11 @@ fn test_config_with_site() {
 
 #[test]
 fn test_unstable_operations_default() {
-    let config = DatadogConfig::new(
-        "test_api_key".to_string(),
-        "test_app_key".to_string(),
-    );
+    let config = DatadogConfig::new("test_api_key".to_string(), "test_app_key".to_string());
 
-    assert!(config.unstable_operations.contains(&"incidents".to_string()));
+    assert!(config
+        .unstable_operations
+        .contains(&"incidents".to_string()));
 }
 
 // ============================================================================
@@ -103,13 +91,11 @@ fn test_synthetics_test_create_request_serialization() {
                 headers: None,
                 body: None,
             },
-            assertions: vec![
-                SyntheticsAssertion {
-                    assertion_type: SyntheticsAssertionType::StatusCode,
-                    operator: SyntheticsAssertionOperator::Is,
-                    target: json!(200),
-                },
-            ],
+            assertions: vec![SyntheticsAssertion {
+                assertion_type: SyntheticsAssertionType::StatusCode,
+                operator: SyntheticsAssertionOperator::Is,
+                target: json!(200),
+            }],
         },
         options: SyntheticsTestOptions {
             tick_every: 300,
@@ -172,9 +158,7 @@ fn test_update_synthetics_test_input_optional_fields() {
 fn test_get_kubernetes_deployments_input() {
     use datadog_mcp::tool_inputs::GetKubernetesDeploymentsInput;
 
-    let input_all = GetKubernetesDeploymentsInput {
-        namespace: None,
-    };
+    let input_all = GetKubernetesDeploymentsInput { namespace: None };
     assert!(input_all.namespace.is_none());
 
     let input_filtered = GetKubernetesDeploymentsInput {
@@ -189,10 +173,7 @@ fn test_get_kubernetes_deployments_input() {
 
 #[test]
 fn test_synthetics_api_creation() {
-    let config = DatadogConfig::new(
-        "test_api_key".to_string(),
-        "test_app_key".to_string(),
-    );
+    let config = DatadogConfig::new("test_api_key".to_string(), "test_app_key".to_string());
     let client = DatadogClient::new(config).unwrap();
     let _api = SyntheticsApi::new(client);
     // Just verify we can create the API instance
@@ -200,10 +181,7 @@ fn test_synthetics_api_creation() {
 
 #[test]
 fn test_downtimes_api_creation() {
-    let config = DatadogConfig::new(
-        "test_api_key".to_string(),
-        "test_app_key".to_string(),
-    );
+    let config = DatadogConfig::new("test_api_key".to_string(), "test_app_key".to_string());
     let client = DatadogClient::new(config).unwrap();
     let _api = DowntimesApi::new(client);
     // Just verify we can create the API instance
@@ -211,10 +189,7 @@ fn test_downtimes_api_creation() {
 
 #[test]
 fn test_metrics_api_creation() {
-    let config = DatadogConfig::new(
-        "test_api_key".to_string(),
-        "test_app_key".to_string(),
-    );
+    let config = DatadogConfig::new("test_api_key".to_string(), "test_app_key".to_string());
     let client = DatadogClient::new(config).unwrap();
     let _api = MetricsApi::new(client);
     // Just verify we can create the API instance
@@ -250,7 +225,7 @@ fn test_retry_config_defaults() {
 
 #[tokio::test]
 async fn test_cache_store_and_load() {
-    use datadog_mcp::cache::{init_cache_in, store_data_in, load_data};
+    use datadog_mcp::cache::{init_cache_in, load_data, store_data_in};
     use datadog_mcp::output::OutputFormat;
     use tempfile::TempDir;
 

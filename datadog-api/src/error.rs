@@ -155,9 +155,18 @@ mod tests {
 
     #[test]
     fn test_is_client_error() {
-        let error_400 = Error::ApiError { status: 400, message: "Bad Request".into() };
-        let error_404 = Error::ApiError { status: 404, message: "Not Found".into() };
-        let error_500 = Error::ApiError { status: 500, message: "Server Error".into() };
+        let error_400 = Error::ApiError {
+            status: 400,
+            message: "Bad Request".into(),
+        };
+        let error_404 = Error::ApiError {
+            status: 404,
+            message: "Not Found".into(),
+        };
+        let error_500 = Error::ApiError {
+            status: 500,
+            message: "Server Error".into(),
+        };
 
         assert!(error_400.is_client_error());
         assert!(error_404.is_client_error());
@@ -166,9 +175,18 @@ mod tests {
 
     #[test]
     fn test_is_server_error() {
-        let error_400 = Error::ApiError { status: 400, message: "Bad Request".into() };
-        let error_500 = Error::ApiError { status: 500, message: "Server Error".into() };
-        let error_503 = Error::ApiError { status: 503, message: "Service Unavailable".into() };
+        let error_400 = Error::ApiError {
+            status: 400,
+            message: "Bad Request".into(),
+        };
+        let error_500 = Error::ApiError {
+            status: 500,
+            message: "Server Error".into(),
+        };
+        let error_503 = Error::ApiError {
+            status: 503,
+            message: "Service Unavailable".into(),
+        };
 
         assert!(!error_400.is_server_error());
         assert!(error_500.is_server_error());
@@ -177,10 +195,22 @@ mod tests {
 
     #[test]
     fn test_specific_error_checks() {
-        let not_found = Error::ApiError { status: 404, message: "Not Found".into() };
-        let unauthorized = Error::ApiError { status: 401, message: "Unauthorized".into() };
-        let forbidden = Error::ApiError { status: 403, message: "Forbidden".into() };
-        let rate_limited = Error::ApiError { status: 429, message: "Too Many Requests".into() };
+        let not_found = Error::ApiError {
+            status: 404,
+            message: "Not Found".into(),
+        };
+        let unauthorized = Error::ApiError {
+            status: 401,
+            message: "Unauthorized".into(),
+        };
+        let forbidden = Error::ApiError {
+            status: 403,
+            message: "Forbidden".into(),
+        };
+        let rate_limited = Error::ApiError {
+            status: 429,
+            message: "Too Many Requests".into(),
+        };
 
         assert!(not_found.is_not_found());
         assert!(unauthorized.is_unauthorized());
@@ -193,7 +223,10 @@ mod tests {
 
     #[test]
     fn test_status_code() {
-        let api_error = Error::ApiError { status: 404, message: "Not Found".into() };
+        let api_error = Error::ApiError {
+            status: 404,
+            message: "Not Found".into(),
+        };
         let config_error = Error::ConfigError("test".into());
 
         assert_eq!(api_error.status_code(), Some(404));
@@ -202,11 +235,26 @@ mod tests {
 
     #[test]
     fn test_is_retryable() {
-        let rate_limited = Error::ApiError { status: 429, message: "Rate Limited".into() };
-        let server_error = Error::ApiError { status: 500, message: "Server Error".into() };
-        let bad_gateway = Error::ApiError { status: 502, message: "Bad Gateway".into() };
-        let not_found = Error::ApiError { status: 404, message: "Not Found".into() };
-        let bad_request = Error::ApiError { status: 400, message: "Bad Request".into() };
+        let rate_limited = Error::ApiError {
+            status: 429,
+            message: "Rate Limited".into(),
+        };
+        let server_error = Error::ApiError {
+            status: 500,
+            message: "Server Error".into(),
+        };
+        let bad_gateway = Error::ApiError {
+            status: 502,
+            message: "Bad Gateway".into(),
+        };
+        let not_found = Error::ApiError {
+            status: 404,
+            message: "Not Found".into(),
+        };
+        let bad_request = Error::ApiError {
+            status: 400,
+            message: "Bad Request".into(),
+        };
 
         assert!(rate_limited.is_retryable());
         assert!(server_error.is_retryable());

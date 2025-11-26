@@ -37,9 +37,7 @@ impl MetricsApi {
 
         let params = QueryParams { from, to, query };
 
-        self.client
-            .get_with_query("/api/v1/query", &params)
-            .await
+        self.client.get_with_query("/api/v1/query", &params).await
     }
 
     /// List active metrics matching a query.
@@ -55,9 +53,7 @@ impl MetricsApi {
 
         let params = QueryParams { q: query };
 
-        self.client
-            .get_with_query("/api/v1/metrics", &params)
-            .await
+        self.client.get_with_query("/api/v1/metrics", &params).await
     }
 
     /// Get metadata for a specific metric.

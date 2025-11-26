@@ -13,8 +13,6 @@ impl SecurityApi {
     }
 
     pub async fn list_security_rules(&self) -> Result<SecurityRulesResponse> {
-        self.client
-            .get("/api/v2/security_monitoring/rules")
-            .await
+        self.client.get("/api/v2/security_monitoring/rules").await
     }
 }

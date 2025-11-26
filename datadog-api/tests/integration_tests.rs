@@ -2,10 +2,7 @@ use datadog_api::{DatadogClient, DatadogConfig};
 
 #[test]
 fn test_client_creation() {
-    let config = DatadogConfig::new(
-        "test_api_key".to_string(),
-        "test_app_key".to_string(),
-    );
+    let config = DatadogConfig::new("test_api_key".to_string(), "test_app_key".to_string());
 
     let client = DatadogClient::new(config.clone());
     assert!(client.is_ok());
@@ -17,11 +14,8 @@ fn test_client_creation() {
 
 #[test]
 fn test_client_config_access() {
-    let config = DatadogConfig::new(
-        "api_key".to_string(),
-        "app_key".to_string(),
-    )
-    .with_site("datadoghq.eu".to_string());
+    let config = DatadogConfig::new("api_key".to_string(), "app_key".to_string())
+        .with_site("datadoghq.eu".to_string());
 
     let client = DatadogClient::new(config).unwrap();
     assert_eq!(client.config().site, "datadoghq.eu");
@@ -35,10 +29,7 @@ fn test_client_is_send_sync() {
 
 #[test]
 fn test_client_is_cloneable() {
-    let config = DatadogConfig::new(
-        "test_api_key".to_string(),
-        "test_app_key".to_string(),
-    );
+    let config = DatadogConfig::new("test_api_key".to_string(), "test_app_key".to_string());
 
     let client = DatadogClient::new(config).unwrap();
     let _cloned = client.clone();

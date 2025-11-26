@@ -7,10 +7,40 @@ use uuid::Uuid;
 
 use crate::output::{Formattable, OutputFormat};
 
-const CACHE_DIR: &str = "datadog_cache";
+const CACHE_DIR_NAME: &str = "datadog-mcp";
+const LEGACY_CACHE_DIR: &str = "datadog_cache";
+
+/// Determine a sensible cache directory respecting OS conventions and overrides.
+fn default_cache_dir() -> PathBuf {
+    // Highest priority: explicit override
+    if let Ok(dir) = std::env::var("DATADOG_MCP_CACHE_DIR") {
+        return PathBuf::from(dir);
+    }
+
+    // Unix: XDG cache dir
+    if let Ok(xdg) = std::env::var("XDG_CACHE_HOME") {
+        return PathBuf::from(xdg).join(CACHE_DIR_NAME);
+    }
+
+    // Windows: LOCALAPPDATA / APPDATA
+    #[cfg(windows)]
+    {
+        if let Ok(dir) = std::env::var("LOCALAPPDATA").or_else(|_| std::env::var("APPDATA")) {
+            return PathBuf::from(dir).join(CACHE_DIR_NAME);
+        }
+    }
+
+    // POSIX fallback: ~/.cache
+    if let Ok(home) = std::env::var("HOME") {
+        return PathBuf::from(home).join(".cache").join(CACHE_DIR_NAME);
+    }
+
+    // Last resort: legacy relative directory in CWD
+    PathBuf::from(LEGACY_CACHE_DIR)
+}
 
 pub async fn init_cache() -> Result<PathBuf> {
-    init_cache_in(CACHE_DIR).await
+    init_cache_in(default_cache_dir()).await
 }
 
 pub async fn init_cache_in(dir: impl AsRef<Path>) -> Result<PathBuf> {
@@ -24,7 +54,10 @@ pub async fn store_data<T: Serialize + Formattable>(
     prefix: &str,
     format: OutputFormat,
 ) -> Result<String> {
-    store_data_in(data, prefix, format, CACHE_DIR).await
+    let dir = default_cache_dir();
+    // Ensure directory exists when using the default path
+    init_cache_in(&dir).await?;
+    store_data_in(data, prefix, format, dir).await
 }
 
 pub async fn store_data_in<T: Serialize + Formattable>(
@@ -59,7 +92,7 @@ pub async fn store_data_in<T: Serialize + Formattable>(
 }
 
 pub async fn cleanup_cache(older_than_hours: u64) -> Result<usize> {
-    let cache_path = PathBuf::from(CACHE_DIR);
+    let cache_path = default_cache_dir();
 
     if !cache_path.exists() {
         return Ok(0);

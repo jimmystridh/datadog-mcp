@@ -1,7 +1,7 @@
-use crate::cache::store_data;
-use crate::response::tool_error;
+use crate::response::{simple_success_with_fields, tool_error};
 use crate::state::ToolContext;
-use datadog_api::{apis::*, models::*};
+use crate::tool_response_with_fields;
+use datadog_api::models::*;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use tracing::{error, info};
@@ -13,7 +13,7 @@ use tracing::{error, info};
 pub async fn validate_api_key(ctx: ToolContext) -> anyhow::Result<Value> {
     info!("Validating API credentials");
 
-    let api = MonitorsApi::new((*ctx.client).clone());
+    let api = ctx.monitors_api();
     let result = api.list_monitors_with_page_size(1).await;
 
     match result {
@@ -47,150 +47,158 @@ pub async fn get_metrics(
 ) -> anyhow::Result<Value> {
     info!("Querying metrics: {}", query);
 
-    let api = MetricsApi::new((*ctx.client).clone());
+    let api = ctx.metrics_api();
     let result = api
         .query_metrics(from_timestamp, to_timestamp, &query)
         .await;
 
-    match result {
-        Ok(data) => {
-            let series = data.series.clone().unwrap_or_default();
-            let series_count = series.len();
-            let total_points: usize = series
-                .iter()
-                .map(|s| s.pointlist.as_ref().map(|p| p.len()).unwrap_or(0))
-                .sum();
-
-            let filepath = store_data(&data, "metrics", ctx.output_format).await?;
-            info!(
+    tool_response_with_fields!(
+        result,
+        "metrics",
+        ctx,
+        data,
+        {
+            let series_count = data.series.as_ref().map(|s| s.len()).unwrap_or(0);
+            let total_points: usize = data
+                .series
+                .as_ref()
+                .map(|s| {
+                    s.iter()
+                        .map(|series| series.pointlist.as_ref().map(|p| p.len()).unwrap_or(0))
+                        .sum()
+                })
+                .unwrap_or(0);
+            format!(
                 "Retrieved {} metric series with {} data points",
                 series_count, total_points
-            );
+            )
+        },
+        {
+            let series_count = data.series.as_ref().map(|s| s.len()).unwrap_or(0);
+            let total_points: usize = data
+                .series
+                .as_ref()
+                .map(|s| {
+                    s.iter()
+                        .map(|series| series.pointlist.as_ref().map(|p| p.len()).unwrap_or(0))
+                        .sum()
+                })
+                .unwrap_or(0);
 
-            Ok(json!({
-                "filepath": filepath,
-                "summary": format!("Retrieved {} metric series with {} data points", series_count, total_points),
+            json!({
                 "series_count": series_count,
                 "data_points": total_points,
                 "query": query,
                 "time_range": format!("{} to {}", from_timestamp, to_timestamp),
-                "status": "success",
-            }))
+            })
         }
-        Err(e) => Ok(tool_error("Failed to get metrics", e)),
-    }
+    )
 }
 
 pub async fn search_metrics(ctx: ToolContext, query: String) -> anyhow::Result<Value> {
     info!("Searching metrics: {}", query);
 
-    let api = MetricsApi::new((*ctx.client).clone());
+    let api = ctx.metrics_api();
     let result = api.list_metrics(&query).await;
 
-    match result {
-        Ok(data) => {
+    tool_response_with_fields!(
+        result,
+        "metrics_search",
+        ctx,
+        data,
+        {
+            let metric_count = data.metrics.as_ref().map(|m| m.len()).unwrap_or(0);
+            format!("Found {} metrics matching '{}'", metric_count, query)
+        },
+        {
             let metrics = data.metrics.clone().unwrap_or_default();
             let sample_metrics: Vec<_> = metrics.iter().take(10).cloned().collect();
-            let metric_count = metrics.len();
-
-            let filepath = store_data(&data, "metrics_search", ctx.output_format).await?;
-            info!("Found {} metrics matching '{}'", metric_count, query);
-
-            Ok(json!({
-                "filepath": filepath,
-                "summary": format!("Found {} metrics matching '{}'", metric_count, query),
-                "metric_count": metric_count,
+            json!({
+                "metric_count": metrics.len(),
                 "sample_metrics": sample_metrics,
-                "status": "success",
-            }))
+            })
         }
-        Err(e) => Ok(tool_error("Failed to search metrics", e)),
-    }
+    )
 }
 
-pub async fn get_metric_metadata(
-    ctx: ToolContext,
-    metric_name: String,
-) -> anyhow::Result<Value> {
+pub async fn get_metric_metadata(ctx: ToolContext, metric_name: String) -> anyhow::Result<Value> {
     info!("Getting metadata for metric: {}", metric_name);
 
-    let api = MetricsApi::new((*ctx.client).clone());
+    let api = ctx.metrics_api();
     let result = api.get_metric_metadata(&metric_name).await;
 
-    match result {
-        Ok(data) => {
-            let filepath = store_data(&data, "metric_metadata", ctx.output_format).await?;
-
-            Ok(json!({
-                "filepath": filepath,
-                "summary": format!("Retrieved metadata for metric: {}", metric_name),
+    tool_response_with_fields!(
+        result,
+        "metric_metadata",
+        ctx,
+        data,
+        format!("Retrieved metadata for metric: {}", metric_name),
+        {
+            json!({
                 "metric_name": metric_name,
-                "description": data.description.unwrap_or_else(|| "No description".to_string()),
-                "unit": data.unit.unwrap_or_else(|| "No unit".to_string()),
-                "type": data.metric_type.unwrap_or_else(|| "Unknown".to_string()),
-                "status": "success",
-            }))
+                "description": data.description.clone().unwrap_or_else(|| "No description".to_string()),
+                "unit": data.unit.clone().unwrap_or_else(|| "No unit".to_string()),
+                "type": data.metric_type.clone().unwrap_or_else(|| "Unknown".to_string()),
+            })
         }
-        Err(e) => Ok(tool_error("Failed to get metric metadata", e)),
-    }
+    )
 }
 
 pub async fn get_monitors(ctx: ToolContext) -> anyhow::Result<Value> {
     info!("Getting all monitors");
 
-    let api = MonitorsApi::new((*ctx.client).clone());
+    let api = ctx.monitors_api();
     let result = api.list_monitors().await;
 
-    match result {
-        Ok(data) => {
+    tool_response_with_fields!(
+        result,
+        "monitors",
+        ctx,
+        data,
+        format!("Retrieved {} monitors", data.len()),
+        {
             let mut states: HashMap<String, usize> = HashMap::new();
-
             for monitor in &data {
                 if let Some(state) = &monitor.overall_state {
                     *states.entry(state.clone()).or_insert(0) += 1;
                 }
             }
-
-            let filepath = store_data(&data, "monitors", ctx.output_format).await?;
-            info!("Retrieved {} monitors", data.len());
-
-            Ok(json!({
-                "filepath": filepath,
-                "summary": format!("Retrieved {} monitors", data.len()),
+            json!({
                 "total_monitors": data.len(),
                 "monitor_states": states,
-                "alerting_count": states.get("Alert").unwrap_or(&0),
-                "status": "success",
-            }))
+                "alerting_count": data.iter().filter(|m| m.overall_state.as_deref() == Some("Alert")).count(),
+            })
         }
-        Err(e) => Ok(tool_error("Failed to get monitors", e)),
-    }
+    )
 }
 
 pub async fn get_monitor(ctx: ToolContext, monitor_id: i64) -> anyhow::Result<Value> {
     info!("Getting monitor: {}", monitor_id);
 
-    let api = MonitorsApi::new((*ctx.client).clone());
+    let api = ctx.monitors_api();
     let result = api.get_monitor(monitor_id).await;
 
-    match result {
-        Ok(data) => {
-            let filepath = store_data(&data, "monitor", ctx.output_format).await?;
-
-            Ok(json!({
-                "filepath": filepath,
-                "summary": format!("Monitor: {} - Status: {}",
-                    data.name.as_ref().unwrap_or(&"Unknown".to_string()),
-                    data.overall_state.as_ref().unwrap_or(&"Unknown".to_string())
-                ),
+    tool_response_with_fields!(
+        result,
+        "monitor",
+        ctx,
+        data,
+        {
+            format!(
+                "Monitor: {} - Status: {}",
+                data.name.as_deref().unwrap_or("Unknown"),
+                data.overall_state.as_deref().unwrap_or("Unknown")
+            )
+        },
+        {
+            json!({
                 "monitor_id": data.id,
                 "monitor_name": data.name,
-                "status": data.overall_state.map(|s| if s == "Alert" { "alerting" } else { "ok" }),
+                "status": data.overall_state.clone().map(|s| if s == "Alert" { "alerting" } else { "ok" }),
                 "monitor_type": data.monitor_type,
-            }))
+            })
         }
-        Err(e) => Ok(tool_error(&format!("Failed to get monitor {}", monitor_id), e)),
-    }
+    )
 }
 
 pub async fn create_monitor(
@@ -214,24 +222,23 @@ pub async fn create_monitor(
         options: monitor_options,
     };
 
-    let api = MonitorsApi::new((*ctx.client).clone());
+    let api = ctx.monitors_api();
     let result = api.create_monitor(&request).await;
 
-    match result {
-        Ok(data) => {
-            let filepath = store_data(&data, "monitor_created", ctx.output_format).await?;
-            info!("Created monitor: {} (ID: {:?})", name, data.id);
-
-            Ok(json!({
-                "filepath": filepath,
-                "summary": format!("Created monitor: {} (ID: {:?})", name, data.id),
+    tool_response_with_fields!(
+        result,
+        "monitor_created",
+        ctx,
+        data,
+        format!("Created monitor: {} (ID: {:?})", name, data.id),
+        {
+            json!({
                 "monitor_id": data.id,
                 "monitor_name": data.name,
                 "status": "created",
-            }))
+            })
         }
-        Err(e) => Ok(tool_error("Failed to create monitor", e)),
-    }
+    )
 }
 
 pub async fn update_monitor(
@@ -254,40 +261,41 @@ pub async fn update_monitor(
         options: monitor_options,
     };
 
-    let api = MonitorsApi::new((*ctx.client).clone());
+    let api = ctx.monitors_api();
     let result = api.update_monitor(monitor_id, &request).await;
 
-    match result {
-        Ok(data) => {
-            let filepath = store_data(&data, "monitor_updated", ctx.output_format).await?;
-            info!("Updated monitor: {:?} (ID: {:?})", data.name, data.id);
-
-            Ok(json!({
-                "filepath": filepath,
-                "summary": format!("Updated monitor: {:?} (ID: {:?})", data.name, data.id),
+    tool_response_with_fields!(
+        result,
+        "monitor_updated",
+        ctx,
+        data,
+        format!("Updated monitor: {:?} (ID: {:?})", data.name, data.id),
+        {
+            json!({
                 "monitor_id": data.id,
                 "monitor_name": data.name,
                 "status": "updated",
-            }))
+            })
         }
-        Err(e) => Ok(tool_error("Failed to update monitor", e)),
-    }
+    )
 }
 
 pub async fn delete_monitor(ctx: ToolContext, monitor_id: i64) -> anyhow::Result<Value> {
     info!("Deleting monitor: {}", monitor_id);
 
-    let api = MonitorsApi::new((*ctx.client).clone());
+    let api = ctx.monitors_api();
     let result = api.delete_monitor(monitor_id).await;
 
     match result {
         Ok(_) => {
             info!("Successfully deleted monitor ID: {}", monitor_id);
-            Ok(json!({
-                "summary": format!("Successfully deleted monitor ID: {}", monitor_id),
-                "monitor_id": monitor_id,
-                "status": "deleted",
-            }))
+            Ok(simple_success_with_fields(
+                format!("Successfully deleted monitor ID: {}", monitor_id),
+                json!({
+                    "monitor_id": monitor_id,
+                    "status": "deleted",
+                }),
+            ))
         }
         Err(e) => Ok(tool_error("Failed to delete monitor", e)),
     }
@@ -300,60 +308,62 @@ pub async fn delete_monitor(ctx: ToolContext, monitor_id: i64) -> anyhow::Result
 pub async fn get_dashboards(ctx: ToolContext) -> anyhow::Result<Value> {
     info!("Getting all dashboards");
 
-    let api = DashboardsApi::new((*ctx.client).clone());
+    let api = ctx.dashboards_api();
     let result = api.list_dashboards().await;
 
-    match result {
-        Ok(data) => {
+    tool_response_with_fields!(
+        result,
+        "dashboards",
+        ctx,
+        data,
+        {
+            let dashboard_count = data.dashboards.as_ref().map(|d| d.len()).unwrap_or(0);
+            format!("Retrieved {} dashboards", dashboard_count)
+        },
+        {
             let dashboards = data.dashboards.clone().unwrap_or_default();
             let sample_dashboards: Vec<_> = dashboards
                 .iter()
                 .take(5)
                 .map(|d| d.title.as_ref().unwrap_or(&"Untitled".to_string()).clone())
                 .collect();
-            let dashboard_count = dashboards.len();
-
-            let filepath = store_data(&data, "dashboards", ctx.output_format).await?;
-            info!("Retrieved {} dashboards", dashboard_count);
-
-            Ok(json!({
-                "filepath": filepath,
-                "summary": format!("Retrieved {} dashboards", dashboard_count),
-                "total_dashboards": dashboard_count,
+            json!({
+                "total_dashboards": dashboards.len(),
                 "sample_dashboards": sample_dashboards,
-                "status": "success",
-            }))
+            })
         }
-        Err(e) => Ok(tool_error("Failed to get dashboards", e)),
-    }
+    )
 }
 
 pub async fn get_dashboard(ctx: ToolContext, dashboard_id: String) -> anyhow::Result<Value> {
     info!("Getting dashboard: {}", dashboard_id);
 
-    let api = DashboardsApi::new((*ctx.client).clone());
+    let api = ctx.dashboards_api();
     let result = api.get_dashboard(&dashboard_id).await;
 
-    match result {
-        Ok(data) => {
+    tool_response_with_fields!(
+        result,
+        "dashboard",
+        ctx,
+        data,
+        {
             let widgets = data.widgets.as_ref().map(|w| w.len()).unwrap_or(0);
-            let filepath = store_data(&data, "dashboard", ctx.output_format).await?;
-
-            Ok(json!({
-                "filepath": filepath,
-                "summary": format!("Dashboard: {:?} with {} widgets",
-                    data.title.as_ref().unwrap_or(&"Untitled".to_string()),
-                    widgets
-                ),
+            format!(
+                "Dashboard: {:?} with {} widgets",
+                data.title.as_ref().unwrap_or(&"Untitled".to_string()),
+                widgets
+            )
+        },
+        {
+            let widgets = data.widgets.as_ref().map(|w| w.len()).unwrap_or(0);
+            json!({
                 "dashboard_id": data.id,
                 "dashboard_title": data.title,
                 "widget_count": widgets,
                 "layout_type": data.layout_type,
-                "status": "success",
-            }))
+            })
         }
-        Err(e) => Ok(tool_error(&format!("Failed to get dashboard {}", dashboard_id), e)),
-    }
+    )
 }
 
 pub async fn create_dashboard(
@@ -376,24 +386,23 @@ pub async fn create_dashboard(
         template_variables: None,
     };
 
-    let api = DashboardsApi::new((*ctx.client).clone());
+    let api = ctx.dashboards_api();
     let result = api.create_dashboard(&dashboard).await;
 
-    match result {
-        Ok(data) => {
-            let filepath = store_data(&data, "dashboard_created", ctx.output_format).await?;
-            info!("Created dashboard: {:?} (ID: {:?})", data.title, data.id);
-
-            Ok(json!({
-                "filepath": filepath,
-                "summary": format!("Created dashboard: {:?} (ID: {:?})", data.title, data.id),
+    tool_response_with_fields!(
+        result,
+        "dashboard_created",
+        ctx,
+        data,
+        format!("Created dashboard: {:?} (ID: {:?})", data.title, data.id),
+        {
+            json!({
                 "dashboard_id": data.id,
                 "dashboard_title": data.title,
                 "status": "created",
-            }))
+            })
         }
-        Err(e) => Ok(tool_error("Failed to create dashboard", e)),
-    }
+    )
 }
 
 pub async fn update_dashboard(
@@ -404,7 +413,7 @@ pub async fn update_dashboard(
 ) -> anyhow::Result<Value> {
     info!("Updating dashboard: {}", dashboard_id);
 
-    let api = DashboardsApi::new((*ctx.client).clone());
+    let api = ctx.dashboards_api();
 
     // Get existing dashboard first
     let existing = api.get_dashboard(&dashboard_id).await?;
@@ -424,40 +433,38 @@ pub async fn update_dashboard(
         .update_dashboard(&dashboard_id, &updated_dashboard)
         .await;
 
-    match result {
-        Ok(data) => {
-            let filepath = store_data(&data, "dashboard_updated", ctx.output_format).await?;
-            info!("Updated dashboard: {:?} (ID: {:?})", data.title, data.id);
-
-            Ok(json!({
-                "filepath": filepath,
-                "summary": format!("Updated dashboard: {:?} (ID: {:?})", data.title, data.id),
+    tool_response_with_fields!(
+        result,
+        "dashboard_updated",
+        ctx,
+        data,
+        format!("Updated dashboard: {:?} (ID: {:?})", data.title, data.id),
+        {
+            json!({
                 "dashboard_id": data.id,
                 "dashboard_title": data.title,
                 "status": "updated",
-            }))
+            })
         }
-        Err(e) => Ok(tool_error("Failed to update dashboard", e)),
-    }
+    )
 }
 
-pub async fn delete_dashboard(
-    ctx: ToolContext,
-    dashboard_id: String,
-) -> anyhow::Result<Value> {
+pub async fn delete_dashboard(ctx: ToolContext, dashboard_id: String) -> anyhow::Result<Value> {
     info!("Deleting dashboard: {}", dashboard_id);
 
-    let api = DashboardsApi::new((*ctx.client).clone());
+    let api = ctx.dashboards_api();
     let result = api.delete_dashboard(&dashboard_id).await;
 
     match result {
         Ok(_) => {
             info!("Successfully deleted dashboard ID: {}", dashboard_id);
-            Ok(json!({
-                "summary": format!("Successfully deleted dashboard ID: {}", dashboard_id),
-                "dashboard_id": dashboard_id,
-                "status": "deleted",
-            }))
+            Ok(simple_success_with_fields(
+                format!("Successfully deleted dashboard ID: {}", dashboard_id),
+                json!({
+                    "dashboard_id": dashboard_id,
+                    "status": "deleted",
+                }),
+            ))
         }
         Err(e) => Ok(tool_error("Failed to delete dashboard", e)),
     }

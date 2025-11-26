@@ -1,7 +1,8 @@
-use crate::cache::{cleanup_cache, load_data, store_data};
-use crate::response::tool_error;
+use crate::cache::{cleanup_cache, load_data};
+use crate::response::{simple_success_with_fields, tool_error};
 use crate::state::ToolContext;
-use datadog_api::{apis::*, models::*};
+use crate::tool_response_with_fields;
+use datadog_api::models::*;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use tracing::{error, info};
@@ -32,25 +33,26 @@ pub async fn search_logs(
         sort: Some("timestamp".to_string()),
     };
 
-    let api = LogsApi::new((*ctx.client).clone());
+    let api = ctx.logs_api();
     let result = api.search_logs(&request).await;
 
-    match result {
-        Ok(data) => {
+    tool_response_with_fields!(
+        result,
+        "logs",
+        ctx,
+        data,
+        {
+            let log_count = data.data.as_ref().map(|l| l.len()).unwrap_or(0);
+            format!("Retrieved {} log entries", log_count)
+        },
+        {
             let logs = data.data.as_ref().map(|l| l.len()).unwrap_or(0);
-            let filepath = store_data(&data, "logs", ctx.output_format).await?;
-            info!("Retrieved {} log entries", logs);
-
-            Ok(json!({
-                "filepath": filepath,
-                "summary": format!("Retrieved {} log entries", logs),
+            json!({
                 "log_count": logs,
                 "time_range": format!("{} to {}", from_time, to_time),
-                "status": "success",
-            }))
+            })
         }
-        Err(e) => Ok(tool_error("Failed to search logs", e)),
-    }
+    )
 }
 
 pub async fn get_events(
@@ -62,29 +64,30 @@ pub async fn get_events(
 ) -> anyhow::Result<Value> {
     info!("Getting events from {} to {}", start, end);
 
-    let api = EventsApi::new((*ctx.client).clone());
+    let api = ctx.events_api();
     let result = api
         .list_events(start, end, priority.as_deref(), sources.as_deref())
         .await;
 
-    match result {
-        Ok(data) => {
-            let events = data.events.as_ref().map(|e| e.len()).unwrap_or(0);
-            let filepath = store_data(&data, "events", ctx.output_format).await?;
-            info!("Retrieved {} events", events);
-
-            Ok(json!({
-                "filepath": filepath,
-                "summary": format!("Retrieved {} events", events),
-                "event_count": events,
+    tool_response_with_fields!(
+        result,
+        "events",
+        ctx,
+        data,
+        {
+            let event_count = data.events.as_ref().map(|e| e.len()).unwrap_or(0);
+            format!("Retrieved {} events", event_count)
+        },
+        {
+            let event_count = data.events.as_ref().map(|e| e.len()).unwrap_or(0);
+            json!({
+                "event_count": event_count,
                 "time_range": format!("{} to {}", start, end),
                 "priority_filter": priority,
                 "sources_filter": sources,
-                "status": "success",
-            }))
+            })
         }
-        Err(e) => Ok(tool_error("Failed to get events", e)),
-    }
+    )
 }
 
 // ============================================================================
@@ -94,75 +97,88 @@ pub async fn get_events(
 pub async fn get_infrastructure(ctx: ToolContext) -> anyhow::Result<Value> {
     info!("Getting infrastructure information");
 
-    let api = InfrastructureApi::new((*ctx.client).clone());
+    let api = ctx.infrastructure_api();
     let result = api.list_hosts().await;
 
-    match result {
-        Ok(data) => {
+    tool_response_with_fields!(
+        result,
+        "infrastructure",
+        ctx,
+        data,
+        {
+            let hosts = data.host_list.as_ref().map(|h| h.len()).unwrap_or(0);
+            let active_hosts = data
+                .host_list
+                .as_ref()
+                .map(|hosts| hosts.iter().filter(|h| h.up.unwrap_or(false)).count())
+                .unwrap_or(0);
+            format!("Found {} hosts ({} active)", hosts, active_hosts)
+        },
+        {
             let hosts = data.host_list.clone().unwrap_or_default();
             let active_hosts = hosts.iter().filter(|h| h.up.unwrap_or(false)).count();
             let total_hosts = hosts.len();
-
-            let filepath = store_data(&data, "infrastructure", ctx.output_format).await?;
-            info!("Found {} hosts ({} active)", total_hosts, active_hosts);
-
-            Ok(json!({
-                "filepath": filepath,
-                "summary": format!("Found {} hosts ({} active)", total_hosts, active_hosts),
+            json!({
                 "total_hosts": total_hosts,
                 "active_hosts": active_hosts,
-                "inactive_hosts": total_hosts - active_hosts,
-                "status": "success",
-            }))
+                "inactive_hosts": total_hosts.saturating_sub(active_hosts),
+            })
         }
-        Err(e) => Ok(tool_error("Failed to get infrastructure", e)),
-    }
+    )
 }
 
 pub async fn get_tags(ctx: ToolContext, source: Option<String>) -> anyhow::Result<Value> {
     info!("Getting host tags");
 
-    let api = InfrastructureApi::new((*ctx.client).clone());
+    let api = ctx.infrastructure_api();
     let result = api.get_tags(source.as_deref()).await;
 
-    match result {
-        Ok(data) => {
+    tool_response_with_fields!(
+        result,
+        "tags",
+        ctx,
+        data,
+        {
             let tags = data.tags.as_ref().map(|t| t.len()).unwrap_or(0);
-            let filepath = store_data(&data, "tags", ctx.output_format).await?;
-
-            Ok(json!({
-                "filepath": filepath,
-                "summary": format!("Retrieved tags for {} hosts", tags),
+            format!("Retrieved tags for {} hosts", tags)
+        },
+        {
+            let tags = data.tags.as_ref().map(|t| t.len()).unwrap_or(0);
+            json!({
                 "host_count": tags,
                 "source": source.unwrap_or_else(|| "all".to_string()),
-                "status": "success",
-            }))
+            })
         }
-        Err(e) => Ok(tool_error("Failed to get tags", e)),
-    }
+    )
 }
 
 pub async fn get_downtimes(ctx: ToolContext) -> anyhow::Result<Value> {
     info!("Getting scheduled downtimes");
 
-    let api = DowntimesApi::new((*ctx.client).clone());
+    let api = ctx.downtimes_api();
     let result = api.list_downtimes().await;
 
-    match result {
-        Ok(data) => {
+    tool_response_with_fields!(
+        result,
+        "downtimes",
+        ctx,
+        data,
+        {
             let active_count = data.iter().filter(|d| d.active.unwrap_or(false)).count();
-            let filepath = store_data(&data, "downtimes", ctx.output_format).await?;
-
-            Ok(json!({
-                "filepath": filepath,
-                "summary": format!("Retrieved {} downtimes ({} active)", data.len(), active_count),
+            format!(
+                "Retrieved {} downtimes ({} active)",
+                data.len(),
+                active_count
+            )
+        },
+        {
+            let active_count = data.iter().filter(|d| d.active.unwrap_or(false)).count();
+            json!({
                 "total_downtimes": data.len(),
                 "active_downtimes": active_count,
-                "status": "success",
-            }))
+            })
         }
-        Err(e) => Ok(tool_error("Failed to get downtimes", e)),
-    }
+    )
 }
 
 pub async fn create_downtime(
@@ -181,40 +197,41 @@ pub async fn create_downtime(
         message,
     };
 
-    let api = DowntimesApi::new((*ctx.client).clone());
+    let api = ctx.downtimes_api();
     let result = api.create_downtime(&request).await;
 
-    match result {
-        Ok(data) => {
-            let filepath = store_data(&data, "downtime_created", ctx.output_format).await?;
-            info!("Created downtime (ID: {:?})", data.id);
-
-            Ok(json!({
-                "filepath": filepath,
-                "summary": format!("Created downtime (ID: {:?})", data.id),
+    tool_response_with_fields!(
+        result,
+        "downtime_created",
+        ctx,
+        data,
+        format!("Created downtime (ID: {:?})", data.id),
+        {
+            json!({
                 "downtime_id": data.id,
                 "scope": data.scope,
                 "status": "created",
-            }))
+            })
         }
-        Err(e) => Ok(tool_error("Failed to create downtime", e)),
-    }
+    )
 }
 
 pub async fn cancel_downtime(ctx: ToolContext, downtime_id: i64) -> anyhow::Result<Value> {
     info!("Cancelling downtime ID: {}", downtime_id);
 
-    let api = DowntimesApi::new((*ctx.client).clone());
+    let api = ctx.downtimes_api();
     let result = api.cancel_downtime(downtime_id).await;
 
     match result {
         Ok(()) => {
             info!("Cancelled downtime ID: {}", downtime_id);
-            Ok(json!({
-                "summary": format!("Cancelled downtime ID: {}", downtime_id),
-                "downtime_id": downtime_id,
-                "status": "cancelled"
-            }))
+            Ok(simple_success_with_fields(
+                format!("Cancelled downtime ID: {}", downtime_id),
+                json!({
+                    "downtime_id": downtime_id,
+                    "status": "cancelled"
+                }),
+            ))
         }
         Err(e) => Ok(tool_error("Failed to cancel downtime", e)),
     }
@@ -227,43 +244,66 @@ pub async fn cancel_downtime(ctx: ToolContext, downtime_id: i64) -> anyhow::Resu
 pub async fn get_synthetics_tests(ctx: ToolContext) -> anyhow::Result<Value> {
     info!("Getting Synthetics tests");
 
-    let api = SyntheticsApi::new((*ctx.client).clone());
+    let api = ctx.synthetics_api();
     let result = api.list_tests().await;
 
-    match result {
-        Ok(data) => {
+    tool_response_with_fields!(
+        result,
+        "synthetics_tests",
+        ctx,
+        data,
+        {
+            let empty_vec = vec![];
+            let tests = data.tests.as_ref().unwrap_or(&empty_vec);
+            format!("Found {} Synthetics tests", tests.len())
+        },
+        {
             let empty_vec = vec![];
             let tests = data.tests.as_ref().unwrap_or(&empty_vec);
             let mut test_types: HashMap<String, usize> = HashMap::new();
-
             for test in tests {
                 if let Some(test_type) = &test.test_type {
                     *test_types.entry(test_type.clone()).or_insert(0) += 1;
                 }
             }
-
-            let filepath = store_data(&data, "synthetics_tests", ctx.output_format).await?;
-
-            Ok(json!({
-                "filepath": filepath,
-                "summary": format!("Found {} Synthetics tests", tests.len()),
+            json!({
                 "test_count": tests.len(),
                 "test_types": test_types,
-                "status": "success",
-            }))
+            })
         }
-        Err(e) => Ok(tool_error("Failed to get Synthetics tests", e)),
-    }
+    )
 }
 
 pub async fn get_synthetics_locations(ctx: ToolContext) -> anyhow::Result<Value> {
     info!("Getting Synthetics locations");
 
-    let api = SyntheticsApi::new((*ctx.client).clone());
+    let api = ctx.synthetics_api();
     let result = api.list_locations().await;
 
-    match result {
-        Ok(data) => {
+    tool_response_with_fields!(
+        result,
+        "synthetics_locations",
+        ctx,
+        data,
+        {
+            let public_locs: Vec<_> = data
+                .locations
+                .iter()
+                .filter(|loc| !loc.is_private.unwrap_or(false))
+                .collect();
+            let private_locs: Vec<_> = data
+                .locations
+                .iter()
+                .filter(|loc| loc.is_private.unwrap_or(false))
+                .collect();
+            format!(
+                "Retrieved {} Synthetics locations ({} public, {} private)",
+                data.locations.len(),
+                public_locs.len(),
+                private_locs.len()
+            )
+        },
+        {
             let public_locs: Vec<_> = data
                 .locations
                 .iter()
@@ -282,10 +322,7 @@ pub async fn get_synthetics_locations(ctx: ToolContext) -> anyhow::Result<Value>
                     .as_ref()
                     .map(|r| r.name.clone())
                     .unwrap_or_else(|| "Unknown".to_string());
-                regions
-                    .entry(region_name)
-                    .or_default()
-                    .push(loc.id.clone());
+                regions.entry(region_name).or_default().push(loc.id.clone());
             }
 
             let eu_locations: Vec<String> = public_locs
@@ -294,26 +331,15 @@ pub async fn get_synthetics_locations(ctx: ToolContext) -> anyhow::Result<Value>
                 .map(|loc| loc.id.clone())
                 .collect();
 
-            let filepath = store_data(&data, "synthetics_locations", ctx.output_format).await?;
-
-            Ok(json!({
-                "filepath": filepath,
-                "summary": format!(
-                    "Retrieved {} Synthetics locations ({} public, {} private)",
-                    data.locations.len(),
-                    public_locs.len(),
-                    private_locs.len()
-                ),
+            json!({
                 "total_locations": data.locations.len(),
                 "public_count": public_locs.len(),
                 "private_count": private_locs.len(),
                 "regions": regions,
                 "eu_locations": eu_locations,
-                "status": "success",
-            }))
+            })
         }
-        Err(e) => Ok(tool_error("Failed to get Synthetics locations", e)),
-    }
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -380,29 +406,25 @@ pub async fn create_synthetics_test(
         status: Some("live".to_string()),
     };
 
-    let api = SyntheticsApi::new((*ctx.client).clone());
+    let api = ctx.synthetics_api();
     let result = api.create_test(&request).await;
 
-    match result {
-        Ok(data) => {
-            let filepath = store_data(&data, "synthetics_test_created", ctx.output_format).await?;
-            info!(
-                "Created Synthetics test: {} (ID: {})",
-                data.name, data.public_id
-            );
-
-            Ok(json!({
-                "filepath": filepath,
-                "summary": format!("Created Synthetics test: {}", data.name),
+    tool_response_with_fields!(
+        result,
+        "synthetics_test_created",
+        ctx,
+        data,
+        format!("Created Synthetics test: {}", data.name),
+        {
+            json!({
                 "public_id": data.public_id,
                 "name": data.name,
                 "type": data.test_type,
                 "status": data.status,
                 "url": url,
-            }))
+            })
         }
-        Err(e) => Ok(tool_error("Failed to create Synthetics test", e)),
-    }
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -420,7 +442,7 @@ pub async fn update_synthetics_test(
 
     info!("Updating Synthetics test: {}", public_id);
 
-    let api = SyntheticsApi::new((*ctx.client).clone());
+    let api = ctx.synthetics_api();
 
     // Get the existing test
     let existing = api.get_test(&public_id).await.map_err(|e| {
@@ -464,21 +486,20 @@ pub async fn update_synthetics_test(
     // Send the update
     let result = api.update_test(&public_id, &updated_request).await;
 
-    match result {
-        Ok(data) => {
-            let filepath = store_data(&data, "synthetics_test_updated", ctx.output_format).await?;
-            info!("Updated Synthetics test: {} (ID: {})", data.name, data.public_id);
-
-            Ok(json!({
-                "filepath": filepath,
-                "summary": format!("Updated Synthetics test: {}", data.name),
+    tool_response_with_fields!(
+        result,
+        "synthetics_test_updated",
+        ctx,
+        data,
+        format!("Updated Synthetics test: {}", data.name),
+        {
+            json!({
                 "public_id": data.public_id,
                 "name": data.name,
                 "status": data.status,
-            }))
+            })
         }
-        Err(e) => Ok(tool_error("Failed to update Synthetics test", e)),
-    }
+    )
 }
 
 pub async fn trigger_synthetics_tests(
@@ -494,33 +515,29 @@ pub async fn trigger_synthetics_tests(
         }));
     }
 
-    let api = SyntheticsApi::new((*ctx.client).clone());
+    let api = ctx.synthetics_api();
     let result = api.trigger_tests(test_ids.clone()).await;
 
-    match result {
-        Ok(data) => {
-            let filepath = store_data(&data, "synthetics_tests_triggered", ctx.output_format).await?;
-            info!(
+    tool_response_with_fields!(
+        result,
+        "synthetics_tests_triggered",
+        ctx,
+        data,
+        {
+            format!(
                 "Triggered {} test(s), {} check(s) started",
                 test_ids.len(),
                 data.triggered_check_ids.len()
-            );
-
-            Ok(json!({
-                "filepath": filepath,
-                "summary": format!(
-                    "Triggered {} test(s), {} check(s) started",
-                    test_ids.len(),
-                    data.triggered_check_ids.len()
-                ),
+            )
+        },
+        {
+            json!({
                 "test_ids": test_ids,
                 "triggered_check_ids": data.triggered_check_ids,
                 "results": data.results,
-                "status": "success",
-            }))
+            })
         }
-        Err(e) => Ok(tool_error("Failed to trigger Synthetics tests", e)),
-    }
+    )
 }
 
 // ============================================================================
@@ -530,11 +547,15 @@ pub async fn trigger_synthetics_tests(
 pub async fn get_security_rules(ctx: ToolContext) -> anyhow::Result<Value> {
     info!("Getting security monitoring rules");
 
-    let api = SecurityApi::new((*ctx.client).clone());
+    let api = ctx.security_api();
     let result = api.list_security_rules().await;
 
-    match result {
-        Ok(data) => {
+    tool_response_with_fields!(
+        result,
+        "security_rules",
+        ctx,
+        data,
+        {
             let empty_vec = vec![];
             let rules = data.data.as_ref().unwrap_or(&empty_vec);
             let enabled_rules = rules
@@ -546,36 +567,48 @@ pub async fn get_security_rules(ctx: ToolContext) -> anyhow::Result<Value> {
                         .unwrap_or(false)
                 })
                 .count();
-
-            let filepath = store_data(&data, "security_rules", ctx.output_format).await?;
-
-            Ok(json!({
-                "filepath": filepath,
-                "summary": format!("Found {} security rules ({} enabled)", rules.len(), enabled_rules),
+            format!(
+                "Found {} security rules ({} enabled)",
+                rules.len(),
+                enabled_rules
+            )
+        },
+        {
+            let empty_vec = vec![];
+            let rules = data.data.as_ref().unwrap_or(&empty_vec);
+            let enabled_rules = rules
+                .iter()
+                .filter(|r| {
+                    r.attributes
+                        .as_ref()
+                        .and_then(|a| a.is_enabled)
+                        .unwrap_or(false)
+                })
+                .count();
+            json!({
                 "total_rules": rules.len(),
                 "enabled_rules": enabled_rules,
-                "disabled_rules": rules.len() - enabled_rules,
-                "status": "success",
-            }))
+                "disabled_rules": rules.len().saturating_sub(enabled_rules),
+            })
         }
-        Err(e) => Ok(tool_error("Failed to get security rules", e)),
-    }
+    )
 }
 
-pub async fn get_incidents(
-    ctx: ToolContext,
-    page_size: Option<i32>,
-) -> anyhow::Result<Value> {
+pub async fn get_incidents(ctx: ToolContext, page_size: Option<i32>) -> anyhow::Result<Value> {
     info!("Getting incidents");
 
-    let api = IncidentsApi::new((*ctx.client).clone());
+    let api = ctx.incidents_api();
     let result = api.list_all_incidents(page_size.unwrap_or(25)).await;
 
-    match result {
-        Ok(incidents) => {
+    tool_response_with_fields!(
+        result,
+        "incidents",
+        ctx,
+        data,
+        format!("Retrieved {} incidents", data.len()),
+        {
             let mut states: HashMap<String, usize> = HashMap::new();
-
-            for incident in &incidents {
+            for incident in &data {
                 if let Some(attrs) = &incident.attributes {
                     if let Some(state) = &attrs.state {
                         *states.entry(state.clone()).or_insert(0) += 1;
@@ -583,64 +616,61 @@ pub async fn get_incidents(
                 }
             }
 
-            let filepath = store_data(&incidents, "incidents", ctx.output_format).await?;
-            info!("Retrieved {} incidents", incidents.len());
-
-            Ok(json!({
-                "filepath": filepath,
-                "summary": format!("Retrieved {} incidents", incidents.len()),
-                "total_incidents": incidents.len(),
+            json!({
+                "total_incidents": data.len(),
                 "incident_states": states,
-                "active_incidents": states.get("active").unwrap_or(&0),
-                "status": "success",
-            }))
+                "active_incidents": states.get("active").copied().unwrap_or(0),
+            })
         }
-        Err(e) => Ok(tool_error("Failed to get incidents", e)),
-    }
+    )
 }
 
 pub async fn get_slos(ctx: ToolContext) -> anyhow::Result<Value> {
     info!("Getting Service Level Objectives");
 
-    let api = SLOsApi::new((*ctx.client).clone());
+    let api = ctx.slos_api();
     let result = api.list_slos().await;
 
-    match result {
-        Ok(data) => {
+    tool_response_with_fields!(
+        result,
+        "slos",
+        ctx,
+        data,
+        {
             let slos = data.data.as_ref().map(|s| s.len()).unwrap_or(0);
-            let filepath = store_data(&data, "slos", ctx.output_format).await?;
-
-            Ok(json!({
-                "filepath": filepath,
-                "summary": format!("Retrieved {} SLOs", slos),
+            format!("Retrieved {} SLOs", slos)
+        },
+        {
+            let slos = data.data.as_ref().map(|s| s.len()).unwrap_or(0);
+            json!({
                 "total_slos": slos,
-                "status": "success",
-            }))
+            })
         }
-        Err(e) => Ok(tool_error("Failed to get SLOs", e)),
-    }
+    )
 }
 
 pub async fn get_notebooks(ctx: ToolContext) -> anyhow::Result<Value> {
     info!("Getting Datadog notebooks");
 
-    let api = NotebooksApi::new((*ctx.client).clone());
+    let api = ctx.notebooks_api();
     let result = api.list_notebooks().await;
 
-    match result {
-        Ok(data) => {
+    tool_response_with_fields!(
+        result,
+        "notebooks",
+        ctx,
+        data,
+        {
             let notebooks = data.data.as_ref().map(|n| n.len()).unwrap_or(0);
-            let filepath = store_data(&data, "notebooks", ctx.output_format).await?;
-
-            Ok(json!({
-                "filepath": filepath,
-                "summary": format!("Retrieved {} notebooks", notebooks),
+            format!("Retrieved {} notebooks", notebooks)
+        },
+        {
+            let notebooks = data.data.as_ref().map(|n| n.len()).unwrap_or(0);
+            json!({
                 "total_notebooks": notebooks,
-                "status": "success",
-            }))
+            })
         }
-        Err(e) => Ok(tool_error("Failed to get notebooks", e)),
-    }
+    )
 }
 
 // ============================================================================
@@ -650,45 +680,49 @@ pub async fn get_notebooks(ctx: ToolContext) -> anyhow::Result<Value> {
 pub async fn get_teams(ctx: ToolContext) -> anyhow::Result<Value> {
     info!("Getting teams");
 
-    let api = TeamsApi::new((*ctx.client).clone());
+    let api = ctx.teams_api();
     let result = api.list_teams().await;
 
-    match result {
-        Ok(data) => {
+    tool_response_with_fields!(
+        result,
+        "teams",
+        ctx,
+        data,
+        {
             let teams = data.data.as_ref().map(|t| t.len()).unwrap_or(0);
-            let filepath = store_data(&data, "teams", ctx.output_format).await?;
-
-            Ok(json!({
-                "filepath": filepath,
-                "summary": format!("Retrieved {} teams", teams),
+            format!("Retrieved {} teams", teams)
+        },
+        {
+            let teams = data.data.as_ref().map(|t| t.len()).unwrap_or(0);
+            json!({
                 "total_teams": teams,
-                "status": "success",
-            }))
+            })
         }
-        Err(e) => Ok(tool_error("Failed to get teams", e)),
-    }
+    )
 }
 
 pub async fn get_users(ctx: ToolContext) -> anyhow::Result<Value> {
     info!("Getting users");
 
-    let api = UsersApi::new((*ctx.client).clone());
+    let api = ctx.users_api();
     let result = api.list_users().await;
 
-    match result {
-        Ok(data) => {
+    tool_response_with_fields!(
+        result,
+        "users",
+        ctx,
+        data,
+        {
             let users = data.users.as_ref().map(|u| u.len()).unwrap_or(0);
-            let filepath = store_data(&data, "users", ctx.output_format).await?;
-
-            Ok(json!({
-                "filepath": filepath,
-                "summary": format!("Retrieved {} users", users),
+            format!("Retrieved {} users", users)
+        },
+        {
+            let users = data.users.as_ref().map(|u| u.len()).unwrap_or(0);
+            json!({
                 "total_users": users,
-                "status": "success",
-            }))
+            })
         }
-        Err(e) => Ok(tool_error("Failed to get users", e)),
-    }
+    )
 }
 
 // ============================================================================
@@ -929,11 +963,39 @@ pub async fn get_kubernetes_deployments(
     );
 
     // Use existing metrics API
-    let api = MetricsApi::new((*ctx.client).clone());
+    let api = ctx.metrics_api();
     let result = api.query_metrics(from_ts, to_ts, &query).await;
 
-    match result {
-        Ok(data) => {
+    tool_response_with_fields!(
+        result,
+        "kubernetes_deployments",
+        ctx,
+        data,
+        {
+            let mut unique_deployment_names = std::collections::HashSet::new();
+            let mut unique_namespaces = std::collections::HashSet::new();
+            if let Some(series) = &data.series {
+                for s in series {
+                    if let Some(scope) = &s.scope {
+                        for tag in scope.split(',') {
+                            if let Some((key, value)) = tag.split_once(':') {
+                                if key == "kube_deployment" {
+                                    unique_deployment_names.insert(value.to_string());
+                                } else if key == "kube_namespace" {
+                                    unique_namespaces.insert(value.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            format!(
+                "Found {} deployments across {} namespaces",
+                unique_deployment_names.len(),
+                unique_namespaces.len()
+            )
+        },
+        {
             // Extract deployment information from series
             let mut deployments = Vec::new();
             let mut unique_deployment_names = std::collections::HashSet::new();
@@ -981,21 +1043,11 @@ pub async fn get_kubernetes_deployments(
             let mut namespace_list: Vec<String> = unique_namespaces.into_iter().collect();
             namespace_list.sort();
 
-            let filepath = store_data(&data, "kubernetes_deployments", ctx.output_format).await?;
-
-            Ok(json!({
-                "filepath": filepath,
-                "summary": format!(
-                    "Found {} deployments across {} namespaces",
-                    deployment_names.len(),
-                    namespace_list.len()
-                ),
+            json!({
                 "deployments": deployments,
                 "unique_deployment_names": deployment_names,
                 "unique_namespaces": namespace_list,
-                "status": "success",
-            }))
+            })
         }
-        Err(e) => Ok(tool_error("Failed to get Kubernetes deployments", e)),
-    }
+    )
 }

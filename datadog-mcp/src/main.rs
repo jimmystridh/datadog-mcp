@@ -40,19 +40,8 @@ async fn main() -> Result<()> {
     // Parse command-line arguments
     let args = Args::parse();
 
-    // Load environment variables from .env file and force override
-    if let Ok(path) = dotenv::dotenv() {
-        // Parse .env file and explicitly set environment variables to override any existing ones
-        for line in std::fs::read_to_string(&path)?.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            if let Some((key, value)) = line.split_once('=') {
-                std::env::set_var(key.trim(), value.trim());
-            }
-        }
-    }
+    // Load environment variables from .env file without overriding existing variables
+    let _ = dotenv::dotenv();
 
     // Initialize tracing to stderr (stdout is reserved for MCP protocol)
     tracing_subscriber::fmt()

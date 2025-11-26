@@ -53,7 +53,10 @@ impl DatadogClient {
 
     /// Checks if an endpoint corresponds to an unstable operation.
     fn is_unstable_operation(&self, endpoint: &str) -> bool {
-        self.config.unstable_operations.iter().any(|op| endpoint.contains(op))
+        self.config
+            .unstable_operations
+            .iter()
+            .any(|op| endpoint.contains(op))
     }
 
     fn build_headers(&self, endpoint: Option<&str>) -> Result<header::HeaderMap> {
@@ -61,13 +64,13 @@ impl DatadogClient {
 
         headers.insert(
             header::HeaderName::from_static("dd-api-key"),
-            header::HeaderValue::from_str(&self.config.api_key)
+            header::HeaderValue::from_str(self.config.api_key.expose())
                 .map_err(|e| Error::ConfigError(format!("Invalid API key: {e}")))?,
         );
 
         headers.insert(
             header::HeaderName::from_static("dd-application-key"),
-            header::HeaderValue::from_str(&self.config.app_key)
+            header::HeaderValue::from_str(self.config.app_key.expose())
                 .map_err(|e| Error::ConfigError(format!("Invalid app key: {e}")))?,
         );
 
@@ -132,10 +135,7 @@ impl DatadogClient {
         let request = self.client.get(&url);
         let request = self.add_auth_headers(request, endpoint)?;
 
-        let response = request
-            .send()
-            .await
-            .map_err(Error::MiddlewareError)?;
+        let response = request.send().await.map_err(Error::MiddlewareError)?;
 
         self.handle_response(response).await
     }
@@ -150,10 +150,7 @@ impl DatadogClient {
         let request = self.client.get(&url).query(query);
         let request = self.add_auth_headers(request, endpoint)?;
 
-        let response = request
-            .send()
-            .await
-            .map_err(Error::MiddlewareError)?;
+        let response = request.send().await.map_err(Error::MiddlewareError)?;
 
         debug!("Response status: {}", response.status());
         self.handle_response(response).await
@@ -168,7 +165,8 @@ impl DatadogClient {
         debug!("POST {url}");
 
         let json_body = serde_json::to_string(body).map_err(Error::JsonError)?;
-        let request = self.client
+        let request = self
+            .client
             .post(&url)
             .body(json_body)
             .header(header::CONTENT_TYPE, "application/json");
@@ -187,7 +185,8 @@ impl DatadogClient {
         debug!("PUT {url}");
 
         let json_body = serde_json::to_string(body).map_err(Error::JsonError)?;
-        let request = self.client
+        let request = self
+            .client
             .put(&url)
             .body(json_body)
             .header(header::CONTENT_TYPE, "application/json");

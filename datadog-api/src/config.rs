@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Retry configuration for API requests.
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -25,12 +27,12 @@ impl Default for RetryConfig {
 }
 
 /// Datadog API configuration containing credentials and regional settings.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct DatadogConfig {
     /// Datadog API key for authentication
-    pub api_key: String,
+    pub api_key: SecretString,
     /// Datadog application key for authentication
-    pub app_key: String,
+    pub app_key: SecretString,
     /// Datadog site/region (defaults to datadoghq.com)
     #[serde(default = "default_site")]
     pub site: String,
@@ -45,6 +47,22 @@ pub struct DatadogConfig {
     base_url_override: Option<String>,
 }
 
+impl fmt::Debug for DatadogConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DatadogConfig")
+            .field("api_key", &"[REDACTED]")
+            .field("app_key", &"[REDACTED]")
+            .field("site", &self.site)
+            .field("retry_config", &self.retry_config)
+            .field("unstable_operations", &self.unstable_operations)
+            .field(
+                "base_url_override",
+                &self.base_url_override.as_ref().map(|_| "[SET]"),
+            )
+            .finish()
+    }
+}
+
 const fn default_site_const() -> &'static str {
     "datadoghq.com"
 }
@@ -54,9 +72,7 @@ fn default_site() -> String {
 }
 
 fn default_unstable_operations() -> Vec<String> {
-    vec![
-        "incidents".to_string(),
-    ]
+    vec!["incidents".to_string()]
 }
 
 impl DatadogConfig {
@@ -66,8 +82,8 @@ impl DatadogConfig {
     #[must_use]
     pub fn new(api_key: String, application_key: String) -> Self {
         Self {
-            api_key,
-            app_key: application_key,
+            api_key: SecretString::new(api_key),
+            app_key: SecretString::new(application_key),
             site: default_site(),
             retry_config: RetryConfig::default(),
             unstable_operations: default_unstable_operations(),
@@ -125,8 +141,8 @@ impl DatadogConfig {
         let site = std::env::var("DD_SITE").unwrap_or_else(|_| default_site());
 
         Ok(Self {
-            api_key,
-            app_key: application_key,
+            api_key: SecretString::new(api_key),
+            app_key: SecretString::new(application_key),
             site,
             retry_config: RetryConfig::default(),
             unstable_operations: default_unstable_operations(),
@@ -135,19 +151,61 @@ impl DatadogConfig {
     }
 }
 
+/// Wrapper for secrets that zeroize on drop and redact debug output.
+#[derive(Clone, Deserialize, Serialize, Zeroize, ZeroizeOnDrop, PartialEq, Eq)]
+#[serde(transparent)]
+pub struct SecretString(String);
+
+impl SecretString {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for SecretString {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("[REDACTED]")
+    }
+}
+
+impl fmt::Display for SecretString {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("[REDACTED]")
+    }
+}
+
+impl PartialEq<str> for SecretString {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other
+    }
+}
+
+impl PartialEq<String> for SecretString {
+    fn eq(&self, other: &String) -> bool {
+        &self.0 == other
+    }
+}
+
+impl PartialEq<&str> for SecretString {
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == *other
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::Error;
     use super::*;
+    use crate::Error;
     use serial_test::serial;
     use std::env;
 
     #[test]
     fn test_config_new() {
-        let config = DatadogConfig::new(
-            "test_api_key".to_string(),
-            "test_app_key".to_string(),
-        );
+        let config = DatadogConfig::new("test_api_key".to_string(), "test_app_key".to_string());
 
         assert_eq!(config.api_key, "test_api_key");
         assert_eq!(config.app_key, "test_app_key");
@@ -156,32 +214,23 @@ mod tests {
 
     #[test]
     fn test_config_with_site() {
-        let config = DatadogConfig::new(
-            "test_api_key".to_string(),
-            "test_app_key".to_string(),
-        )
-        .with_site("datadoghq.eu".to_string());
+        let config = DatadogConfig::new("test_api_key".to_string(), "test_app_key".to_string())
+            .with_site("datadoghq.eu".to_string());
 
         assert_eq!(config.site, "datadoghq.eu");
     }
 
     #[test]
     fn test_base_url_us1() {
-        let config = DatadogConfig::new(
-            "test_api_key".to_string(),
-            "test_app_key".to_string(),
-        );
+        let config = DatadogConfig::new("test_api_key".to_string(), "test_app_key".to_string());
 
         assert_eq!(config.base_url(), "https://api.datadoghq.com");
     }
 
     #[test]
     fn test_base_url_eu() {
-        let config = DatadogConfig::new(
-            "test_api_key".to_string(),
-            "test_app_key".to_string(),
-        )
-        .with_site("datadoghq.eu".to_string());
+        let config = DatadogConfig::new("test_api_key".to_string(), "test_app_key".to_string())
+            .with_site("datadoghq.eu".to_string());
 
         assert_eq!(config.base_url(), "https://api.datadoghq.eu");
     }
@@ -257,11 +306,8 @@ mod tests {
 
     #[test]
     fn test_config_serialization() {
-        let config = DatadogConfig::new(
-            "api_key".to_string(),
-            "app_key".to_string(),
-        )
-        .with_site("datadoghq.eu".to_string());
+        let config = DatadogConfig::new("api_key".to_string(), "app_key".to_string())
+            .with_site("datadoghq.eu".to_string());
 
         let json = serde_json::to_string(&config).expect("Failed to serialize");
         let deserialized: DatadogConfig =

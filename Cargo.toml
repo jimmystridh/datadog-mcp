@@ -38,5 +38,8 @@ dotenv = "0.15"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
+# Memory safety
+zeroize = { version = "1.8", features = ["derive"] }
+
 # JSON-RPC
 async-trait = "0.1"

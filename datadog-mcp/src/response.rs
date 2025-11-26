@@ -102,7 +102,9 @@ pub fn simple_success_with_fields(summary: impl Into<String>, additional_fields:
 macro_rules! tool_response {
     ($result:expr, $prefix:expr, $ctx:expr, $summary:expr) => {
         match $result {
-            Ok(data) => $crate::response::tool_success(&data, $prefix, $ctx.output_format, $summary).await,
+            Ok(data) => {
+                $crate::response::tool_success(&data, $prefix, $ctx.output_format, $summary).await
+            }
             Err(e) => Ok($crate::response::tool_error($prefix, e)),
         }
     };
@@ -116,11 +118,18 @@ macro_rules! tool_response {
 /// ```
 #[macro_export]
 macro_rules! tool_response_with_fields {
-    ($result:expr, $prefix:expr, $ctx:expr, $summary:expr, $fields:expr) => {
+    ($result:expr, $prefix:expr, $ctx:expr, $data_ident:ident, $summary:expr, $fields:block) => {
         match $result {
-            Ok(data) => $crate::response::tool_success_with_fields(
-                &data, $prefix, $ctx.output_format, $summary, $fields
-            ).await,
+            Ok($data_ident) => {
+                $crate::response::tool_success_with_fields(
+                    &$data_ident,
+                    $prefix,
+                    $ctx.output_format,
+                    $summary,
+                    $fields,
+                )
+                .await
+            }
             Err(e) => Ok($crate::response::tool_error($prefix, e)),
         }
     };
@@ -135,7 +144,10 @@ mod tests {
         let result = tool_error("get_monitors", "connection failed");
         assert_eq!(result["status"], "error");
         assert!(result["error"].as_str().unwrap().contains("get_monitors"));
-        assert!(result["error"].as_str().unwrap().contains("connection failed"));
+        assert!(result["error"]
+            .as_str()
+            .unwrap()
+            .contains("connection failed"));
     }
 
     #[test]
@@ -147,10 +159,7 @@ mod tests {
 
     #[test]
     fn test_simple_success_with_fields() {
-        let result = simple_success_with_fields(
-            "Deleted monitor",
-            json!({"monitor_id": 123}),
-        );
+        let result = simple_success_with_fields("Deleted monitor", json!({"monitor_id": 123}));
         assert_eq!(result["status"], "success");
         assert_eq!(result["summary"], "Deleted monitor");
         assert_eq!(result["monitor_id"], 123);

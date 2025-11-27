@@ -40,7 +40,22 @@ fn default_cache_dir() -> PathBuf {
 }
 
 pub async fn init_cache() -> Result<PathBuf> {
-    init_cache_in(default_cache_dir()).await
+    // Try OS-appropriate cache; if creation fails, fall back to legacy relative dir
+    let preferred = default_cache_dir();
+    match init_cache_in(&preferred).await {
+        Ok(path) => Ok(path),
+        Err(e) => {
+            tracing::warn!(
+                "Failed to create cache at {}: {}. Falling back to ./{}",
+                preferred.display(),
+                e,
+                LEGACY_CACHE_DIR
+            );
+            let fallback = PathBuf::from(LEGACY_CACHE_DIR);
+            init_cache_in(&fallback).await?;
+            Ok(fallback)
+        }
+    }
 }
 
 pub async fn init_cache_in(dir: impl AsRef<Path>) -> Result<PathBuf> {
@@ -54,9 +69,7 @@ pub async fn store_data<T: Serialize + Formattable>(
     prefix: &str,
     format: OutputFormat,
 ) -> Result<String> {
-    let dir = default_cache_dir();
-    // Ensure directory exists when using the default path
-    init_cache_in(&dir).await?;
+    let dir = init_cache().await?;
     store_data_in(data, prefix, format, dir).await
 }
 

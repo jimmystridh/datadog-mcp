@@ -41,5 +41,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Memory safety
 zeroize = { version = "1.8", features = ["derive"] }
 
+# Secure storage (platform keyrings)
+keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "sync-secret-service"] }
+
 # JSON-RPC
 async-trait = "0.1"

@@ -1,3 +1,4 @@
+use keyring::Entry;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::PathBuf;
@@ -156,6 +157,9 @@ impl DatadogConfig {
         if let Ok(file_cfg) = Self::from_credentials_file() {
             return Ok(file_cfg);
         }
+        if let Ok(keyring_cfg) = Self::from_keyring() {
+            return Ok(keyring_cfg);
+        }
         Self::from_env()
     }
 
@@ -178,6 +182,42 @@ impl DatadogConfig {
         })?;
         Ok(Self::new(file_cfg.api_key, file_cfg.app_key)
             .with_site(file_cfg.site.unwrap_or_else(default_site)))
+    }
+
+    /// Load configuration from the system keyring entry, if present.
+    ///
+    /// Profile defaults to `DD_PROFILE` or `default`.
+    pub fn from_keyring() -> crate::Result<Self> {
+        let profile = std::env::var("DD_PROFILE").unwrap_or_else(|_| "default".to_string());
+        let entry = Entry::new(KEYRING_SERVICE, &profile)
+            .map_err(|e| crate::Error::ConfigError(format!("Failed to access keyring: {e}")))?;
+        let secret = entry
+            .get_password()
+            .map_err(|e| crate::Error::ConfigError(format!("Failed to read keyring entry: {e}")))?;
+        let creds: FileCredentials = serde_json::from_str(&secret).map_err(|e| {
+            crate::Error::ConfigError(format!("Invalid keyring credentials format: {e}"))
+        })?;
+        Ok(Self::new(creds.api_key, creds.app_key)
+            .with_site(creds.site.unwrap_or_else(default_site)))
+    }
+
+    /// Store the current configuration in the system keyring entry.
+    ///
+    /// Profile defaults to `DD_PROFILE` or `default`.
+    pub fn store_in_keyring(&self) -> crate::Result<()> {
+        let profile = std::env::var("DD_PROFILE").unwrap_or_else(|_| "default".to_string());
+        let entry = Entry::new(KEYRING_SERVICE, &profile)
+            .map_err(|e| crate::Error::ConfigError(format!("Failed to access keyring: {e}")))?;
+        let payload = serde_json::to_string(&FileCredentials {
+            api_key: self.api_key.expose().to_string(),
+            app_key: self.app_key.expose().to_string(),
+            site: Some(self.site.clone()),
+        })
+        .map_err(|e| crate::Error::ConfigError(format!("Failed to serialize credentials: {e}")))?;
+        entry.set_password(&payload).map_err(|e| {
+            crate::Error::ConfigError(format!("Failed to store keyring entry: {e}"))
+        })?;
+        Ok(())
     }
 }
 
@@ -233,6 +273,8 @@ struct FileCredentials {
     #[serde(default)]
     site: Option<String>,
 }
+
+const KEYRING_SERVICE: &str = "datadog-mcp";
 
 #[cfg(test)]
 mod tests {

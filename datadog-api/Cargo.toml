@@ -17,6 +17,7 @@ thiserror = { workspace = true }
 chrono = { workspace = true }
 tracing = { workspace = true }
 zeroize = { workspace = true }
+keyring = { workspace = true }
 
 [dev-dependencies]
 tokio-test = "0.4"

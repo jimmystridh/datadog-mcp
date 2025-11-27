@@ -30,7 +30,7 @@ pub struct GetMetricMetadataInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct GetMonitorInput {
     #[schemars(description = "Monitor ID")]
-    pub monitor_id: i64,
+    pub monitor_id: MonitorId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -44,13 +44,13 @@ pub struct CreateMonitorInput {
     #[schemars(description = "Monitor message")]
     pub message: Option<String>,
     #[schemars(description = "Monitor options")]
-    pub options: Option<serde_json::Value>,
+    pub options: Option<MonitorOptions>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct UpdateMonitorInput {
     #[schemars(description = "Monitor ID")]
-    pub monitor_id: i64,
+    pub monitor_id: MonitorId,
     #[schemars(description = "Monitor name")]
     pub name: Option<String>,
     #[schemars(description = "Monitor query")]
@@ -58,13 +58,13 @@ pub struct UpdateMonitorInput {
     #[schemars(description = "Monitor message")]
     pub message: Option<String>,
     #[schemars(description = "Monitor options")]
-    pub options: Option<serde_json::Value>,
+    pub options: Option<MonitorOptions>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DeleteMonitorInput {
     #[schemars(description = "Monitor ID to delete")]
-    pub monitor_id: i64,
+    pub monitor_id: MonitorId,
 }
 
 // ============================================================================
@@ -392,5 +392,54 @@ mod tests {
 
         assert_eq!(deserialized.filepath, "/tmp/data.json");
         assert_eq!(deserialized.analysis_type, Some("summary".to_string()));
+    }
+}
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(transparent)]
+pub struct MonitorId(pub i64);
+
+impl std::fmt::Display for MonitorId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct MonitorOptions {
+    #[schemars(description = "Alerting thresholds")]
+    pub thresholds: Option<MonitorThresholds>,
+    #[schemars(description = "Notify when no data is received")]
+    pub notify_no_data: Option<bool>,
+    #[schemars(description = "Evaluation delay in seconds")]
+    pub evaluation_delay: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct MonitorThresholds {
+    pub critical: Option<f64>,
+    pub warning: Option<f64>,
+    #[serde(rename = "ok")]
+    pub ok: Option<f64>,
+}
+
+impl From<MonitorThresholds> for datadog_api::models::MonitorThresholds {
+    fn from(src: MonitorThresholds) -> Self {
+        datadog_api::models::MonitorThresholds {
+            critical: src.critical,
+            warning: src.warning,
+            ok: src.ok,
+        }
+    }
+}
+
+impl From<MonitorOptions> for datadog_api::models::MonitorOptions {
+    fn from(src: MonitorOptions) -> Self {
+        datadog_api::models::MonitorOptions {
+            thresholds: src.thresholds.map(|t| t.into()),
+            notify_no_data: src.notify_no_data,
+            no_data_timeframe: src.evaluation_delay,
+            renotify_interval: None,
+            escalation_message: None,
+        }
     }
 }

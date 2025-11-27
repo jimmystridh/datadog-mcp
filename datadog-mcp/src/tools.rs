@@ -1,5 +1,6 @@
 use crate::response::{simple_success_with_fields, tool_error};
 use crate::state::ToolContext;
+use crate::tool_inputs::{MonitorId, MonitorOptions};
 use crate::tool_response_with_fields;
 use datadog_api::models::*;
 use serde_json::{json, Value};
@@ -172,11 +173,11 @@ pub async fn get_monitors(ctx: ToolContext) -> anyhow::Result<Value> {
     )
 }
 
-pub async fn get_monitor(ctx: ToolContext, monitor_id: i64) -> anyhow::Result<Value> {
-    info!("Getting monitor: {}", monitor_id);
+pub async fn get_monitor(ctx: ToolContext, monitor_id: MonitorId) -> anyhow::Result<Value> {
+    info!("Getting monitor: {}", monitor_id.0);
 
     let api = ctx.monitors_api();
-    let result = api.get_monitor(monitor_id).await;
+    let result = api.get_monitor(monitor_id.0).await;
 
     tool_response_with_fields!(
         result,
@@ -207,11 +208,9 @@ pub async fn create_monitor(
     monitor_type: String,
     query: String,
     message: Option<String>,
-    options: Option<Value>,
+    options: Option<MonitorOptions>,
 ) -> anyhow::Result<Value> {
     info!("Creating monitor: {}", name);
-
-    let monitor_options = options.and_then(|v| serde_json::from_value(v).ok());
 
     let request = MonitorCreateRequest {
         name: name.clone(),
@@ -219,7 +218,7 @@ pub async fn create_monitor(
         query: query.clone(),
         message,
         tags: None,
-        options: monitor_options,
+        options: options.map(|opt| opt.into()),
     };
 
     let api = ctx.monitors_api();
@@ -243,26 +242,24 @@ pub async fn create_monitor(
 
 pub async fn update_monitor(
     ctx: ToolContext,
-    monitor_id: i64,
+    monitor_id: MonitorId,
     name: Option<String>,
     query: Option<String>,
     message: Option<String>,
-    options: Option<Value>,
+    options: Option<MonitorOptions>,
 ) -> anyhow::Result<Value> {
-    info!("Updating monitor: {}", monitor_id);
-
-    let monitor_options = options.and_then(|v| serde_json::from_value(v).ok());
+    info!("Updating monitor: {}", monitor_id.0);
 
     let request = MonitorUpdateRequest {
         name,
         query,
         message,
         tags: None,
-        options: monitor_options,
+        options: options.map(|opt| opt.into()),
     };
 
     let api = ctx.monitors_api();
-    let result = api.update_monitor(monitor_id, &request).await;
+    let result = api.update_monitor(monitor_id.0, &request).await;
 
     tool_response_with_fields!(
         result,
@@ -280,11 +277,11 @@ pub async fn update_monitor(
     )
 }
 
-pub async fn delete_monitor(ctx: ToolContext, monitor_id: i64) -> anyhow::Result<Value> {
-    info!("Deleting monitor: {}", monitor_id);
+pub async fn delete_monitor(ctx: ToolContext, monitor_id: MonitorId) -> anyhow::Result<Value> {
+    info!("Deleting monitor: {}", monitor_id.0);
 
     let api = ctx.monitors_api();
-    let result = api.delete_monitor(monitor_id).await;
+    let result = api.delete_monitor(monitor_id.0).await;
 
     match result {
         Ok(_) => {

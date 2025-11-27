@@ -24,6 +24,10 @@ struct Args {
     /// Output format for MCP responses (json or toon)
     #[arg(long, default_value = "toon", value_parser = parse_format)]
     format: OutputFormat,
+
+    /// Store credentials from env or file into the system keyring instead of starting the server
+    #[arg(long)]
+    store_credentials: bool,
 }
 
 fn parse_format(s: &str) -> Result<OutputFormat, String> {
@@ -57,6 +61,13 @@ async fn main() -> Result<()> {
 
     // Load Datadog configuration
     let config = datadog_api::config::DatadogConfig::from_env_or_file()?;
+
+    // If requested, store credentials in keyring and exit
+    if args.store_credentials {
+        config.store_in_keyring()?;
+        info!("Stored Datadog credentials in keyring");
+        return Ok(());
+    }
     info!("Loaded Datadog configuration for site: {}", config.site);
 
     // Initialize server state with output format

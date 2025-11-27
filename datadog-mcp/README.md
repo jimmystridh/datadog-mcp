@@ -34,6 +34,10 @@ cargo build --release
 export DD_API_KEY="your_api_key"
 export DD_APP_KEY="your_app_key"
 export DD_SITE="datadoghq.eu"  # or datadoghq.com, us3.datadoghq.com, etc.
+
+# Optional: store credentials in your system keyring (macOS Keychain, Windows Credential Manager, Secret Service)
+DD_PROFILE=default ./target/release/datadog-mcp --store-credentials
+# Afterwards you can unset the env vars; the server will read from keyring first, then ~/.datadog-mcp/credentials.json, then env vars.
 ```
 
 ### 3. Run
@@ -57,7 +61,13 @@ export DD_SITE="datadoghq.eu"  # or datadoghq.com, us3.datadoghq.com, etc.
 | `DD_API_KEY` | Yes | Datadog API key |
 | `DD_APP_KEY` | Yes | Datadog Application key |
 | `DD_SITE` | No | Datadog site (default: `datadoghq.com`) |
+| `DD_PROFILE` | No | Credential profile name (used for keyring entry; default `default`) |
 | `RUST_LOG` | No | Log level: `error`, `warn`, `info`, `debug`, `trace` |
+
+### Credential Storage Order
+1. System keyring (`datadog-mcp` service, profile `DD_PROFILE` or `default`)
+2. `~/.datadog-mcp/credentials.json` (`{"api_key":"...","app_key":"...","site":"..."}`)
+3. Environment variables (`DD_API_KEY`, `DD_APP_KEY`, `DD_SITE`)
 
 ### Supported Datadog Sites
 

@@ -10,7 +10,6 @@ mod tools_part2;
 
 use anyhow::Result;
 use clap::Parser;
-use datadog_api::DatadogConfig;
 use output::OutputFormat;
 use rmcp::{transport::stdio, ServiceExt};
 use server::DatadogMcpServer;
@@ -57,7 +56,7 @@ async fn main() -> Result<()> {
     cache::init_cache().await?;
 
     // Load Datadog configuration
-    let config = DatadogConfig::from_env()?;
+    let config = datadog_api::config::DatadogConfig::from_env_or_file()?;
     info!("Loaded Datadog configuration for site: {}", config.site);
 
     // Initialize server state with output format

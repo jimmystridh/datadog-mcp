@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::path::PathBuf;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Retry configuration for API requests.
@@ -149,6 +150,35 @@ impl DatadogConfig {
             base_url_override: None,
         })
     }
+
+    /// Attempt to load credentials from ~/.datadog-mcp/credentials.json, falling back to env vars.
+    pub fn from_env_or_file() -> crate::Result<Self> {
+        if let Ok(file_cfg) = Self::from_credentials_file() {
+            return Ok(file_cfg);
+        }
+        Self::from_env()
+    }
+
+    fn from_credentials_file() -> crate::Result<Self> {
+        let home = std::env::var("HOME").map_err(|_| {
+            crate::Error::ConfigError("HOME not set; cannot read credentials file".to_string())
+        })?;
+        let path = PathBuf::from(home)
+            .join(".datadog-mcp")
+            .join("credentials.json");
+        let content = std::fs::read_to_string(&path).map_err(|e| {
+            crate::Error::ConfigError(format!("Failed to read {}: {}", path.display(), e))
+        })?;
+        let file_cfg: FileCredentials = serde_json::from_str(&content).map_err(|e| {
+            crate::Error::ConfigError(format!(
+                "Invalid credentials file {}: {}",
+                path.display(),
+                e
+            ))
+        })?;
+        Ok(Self::new(file_cfg.api_key, file_cfg.app_key)
+            .with_site(file_cfg.site.unwrap_or_else(default_site)))
+    }
 }
 
 /// Wrapper for secrets that zeroize on drop and redact debug output.
@@ -194,6 +224,14 @@ impl PartialEq<&str> for SecretString {
     fn eq(&self, other: &&str) -> bool {
         self.0 == *other
     }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct FileCredentials {
+    api_key: String,
+    app_key: String,
+    #[serde(default)]
+    site: Option<String>,
 }
 
 #[cfg(test)]

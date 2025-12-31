@@ -80,8 +80,8 @@ pub async fn get_kubernetes_deployments(
     // Query for deployment replicas in the last 5 minutes
     let to_ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64;
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or_else(|_| chrono::Utc::now().timestamp());
     let from_ts = to_ts - 300; // 5 minutes ago
 
     // Build query with optional namespace filter

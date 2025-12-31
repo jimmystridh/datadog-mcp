@@ -6,6 +6,31 @@ use serde::de::DeserializeOwned;
 use std::time::Duration;
 use tracing::{debug, error, trace};
 
+fn sanitize_log_message(message: &str) -> String {
+    use regex::Regex;
+
+    let key_pattern = r#"dd-api-key|dd-application-key|DD_API_KEY|DD_APP_KEY|api_key|app_key|apikey|appkey"#;
+
+    let patterns = [
+        // JSON style: "api_key": "value" or "api_key":"value"
+        format!(r#"(?i)"({key_pattern})"\s*:\s*"([^"]*)""#),
+        // Header/env style with quoted value: api_key: "value" or api_key="value"
+        format!(r#"(?i)({key_pattern})\s*[:=]\s*"([^"]*)""#),
+        // Header/env style with single-quoted value
+        format!(r#"(?i)({key_pattern})\s*[:=]\s*'([^']*)'"#),
+        // Header/env style with unquoted value
+        format!(r#"(?i)({key_pattern})\s*[:=]\s*([^\s,}}"'\n]+)"#),
+    ];
+
+    let mut result = message.to_string();
+    for pattern in patterns {
+        if let Ok(re) = Regex::new(&pattern) {
+            result = re.replace_all(&result, "\"$1\": \"[REDACTED]\"").to_string();
+        }
+    }
+    result
+}
+
 /// HTTP client for interacting with the Datadog API.
 ///
 /// Handles authentication, request building, and response parsing for all Datadog API endpoints.
@@ -119,11 +144,12 @@ impl DatadogClient {
                 .await
                 .unwrap_or_else(|_| "Failed to read error body".to_string());
 
-            error!("API error: {status_code} - {error_body}");
+            let sanitized_body = sanitize_log_message(&error_body);
+            error!("API error: {status_code} - {sanitized_body}");
 
             Err(Error::ApiError {
                 status: status_code,
-                message: error_body,
+                message: sanitized_body,
             })
         }
     }
@@ -215,11 +241,12 @@ impl DatadogClient {
                 .await
                 .unwrap_or_else(|_| "Failed to read error body".to_string());
 
-            error!("API error: {} - {}", status_code, error_body);
+            let sanitized_body = sanitize_log_message(&error_body);
+            error!("API error: {} - {}", status_code, sanitized_body);
 
             Err(Error::ApiError {
                 status: status_code,
-                message: error_body,
+                message: sanitized_body,
             })
         }
     }
@@ -233,5 +260,56 @@ impl DatadogClient {
 
         let response = request.send().await.map_err(Error::MiddlewareError)?;
         self.handle_response(response).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sanitize_json_api_key() {
+        let input = r#"{"error": "Invalid api_key: abc123secret"}"#;
+        let output = sanitize_log_message(input);
+        assert!(!output.contains("abc123secret"));
+        assert!(output.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn test_sanitize_header_style() {
+        let input = "dd-api-key: secret123abc";
+        let output = sanitize_log_message(input);
+        assert!(!output.contains("secret123abc"));
+        assert!(output.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn test_sanitize_env_var_style() {
+        let input = "DD_API_KEY=mysecretkey and DD_APP_KEY=anothersecret";
+        let output = sanitize_log_message(input);
+        assert!(!output.contains("mysecretkey"));
+        assert!(!output.contains("anothersecret"));
+    }
+
+    #[test]
+    fn test_sanitize_quoted_value() {
+        let input = r#"{"api_key": "secret_value_here", "other": "data"}"#;
+        let output = sanitize_log_message(input);
+        assert!(!output.contains("secret_value_here"));
+        assert!(output.contains("other"));
+    }
+
+    #[test]
+    fn test_sanitize_no_secrets() {
+        let input = "This is a normal error message without any secrets";
+        let output = sanitize_log_message(input);
+        assert_eq!(input, output);
+    }
+
+    #[test]
+    fn test_sanitize_case_insensitive() {
+        let input = "API_KEY=secret123";
+        let output = sanitize_log_message(input);
+        assert!(!output.contains("secret123"));
     }
 }

@@ -38,6 +38,9 @@ dotenv = "0.15"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
+# Text processing
+regex = "1.12"
+
 # Memory safety
 zeroize = { version = "1.8", features = ["derive"] }
 

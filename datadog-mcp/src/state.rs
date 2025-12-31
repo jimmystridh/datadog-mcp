@@ -110,3 +110,68 @@ impl ServerState {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_config() -> DatadogConfig {
+        DatadogConfig::new("test_api_key".into(), "test_app_key".into())
+    }
+
+    #[tokio::test]
+    async fn test_server_state_creation() {
+        let config = test_config();
+        let state = ServerState::new(config, OutputFormat::Json).await.unwrap();
+        assert_eq!(state.output_format, OutputFormat::Json);
+        assert_eq!(state.config.site, "datadoghq.com");
+    }
+
+    #[tokio::test]
+    async fn test_server_state_tool_context() {
+        let config = test_config();
+        let state = ServerState::new(config, OutputFormat::Toon).await.unwrap();
+        let ctx = state.tool_context();
+        assert_eq!(ctx.output_format, OutputFormat::Toon);
+    }
+
+    #[test]
+    fn test_tool_context_creation() {
+        let config = test_config();
+        let client = DatadogClient::new(config).unwrap();
+        let ctx = ToolContext::new(Arc::new(client), OutputFormat::Json);
+        assert_eq!(ctx.output_format, OutputFormat::Json);
+    }
+
+    #[test]
+    fn test_tool_context_api_accessors() {
+        let config = test_config();
+        let client = DatadogClient::new(config).unwrap();
+        let ctx = ToolContext::new(Arc::new(client), OutputFormat::Json);
+
+        // Just verify all API accessors work without panicking
+        let _ = ctx.metrics_api();
+        let _ = ctx.monitors_api();
+        let _ = ctx.dashboards_api();
+        let _ = ctx.logs_api();
+        let _ = ctx.events_api();
+        let _ = ctx.infrastructure_api();
+        let _ = ctx.downtimes_api();
+        let _ = ctx.synthetics_api();
+        let _ = ctx.security_api();
+        let _ = ctx.incidents_api();
+        let _ = ctx.slos_api();
+        let _ = ctx.notebooks_api();
+        let _ = ctx.teams_api();
+        let _ = ctx.users_api();
+    }
+
+    #[test]
+    fn test_tool_context_clone() {
+        let config = test_config();
+        let client = DatadogClient::new(config).unwrap();
+        let ctx = ToolContext::new(Arc::new(client), OutputFormat::Toon);
+        let cloned = ctx.clone();
+        assert_eq!(cloned.output_format, ctx.output_format);
+    }
+}

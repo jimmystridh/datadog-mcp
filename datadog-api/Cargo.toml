@@ -16,6 +16,7 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 chrono = { workspace = true }
 tracing = { workspace = true }
+regex = { workspace = true }
 zeroize = { workspace = true }
 keyring = { workspace = true }
 

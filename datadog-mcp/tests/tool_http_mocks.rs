@@ -679,3 +679,96 @@ async fn server_error() {
     let out = tools::get_dashboards(ctx).await.unwrap();
     assert_eq!(out["status"], "error");
 }
+
+// ============================================================================
+// Input Validation Tests
+// ============================================================================
+
+#[tokio::test]
+async fn create_monitor_invalid_type() {
+    let server = MockServer::start().await;
+    // No mock needed - validation should fail before API call
+    let ctx = mock_context(&server).await;
+    let out = tools::create_monitor(
+        ctx,
+        "Test Monitor".into(),
+        "invalid_type".into(),
+        "avg(last_5m):avg:system.cpu.user{*} > 80".into(),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(out["status"], "error");
+    assert!(out["error"]
+        .as_str()
+        .unwrap()
+        .contains("Invalid monitor type"));
+}
+
+#[tokio::test]
+async fn create_monitor_empty_name() {
+    let server = MockServer::start().await;
+    let ctx = mock_context(&server).await;
+    let out = tools::create_monitor(
+        ctx,
+        "   ".into(), // Whitespace-only name
+        "metric alert".into(),
+        "avg(last_5m):avg:system.cpu.user{*} > 80".into(),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(out["status"], "error");
+    assert!(out["error"].as_str().unwrap().contains("Empty"));
+}
+
+#[tokio::test]
+async fn create_monitor_empty_query() {
+    let server = MockServer::start().await;
+    let ctx = mock_context(&server).await;
+    let out = tools::create_monitor(
+        ctx,
+        "Test Monitor".into(),
+        "metric alert".into(),
+        "".into(), // Empty query
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(out["status"], "error");
+    assert!(out["error"].as_str().unwrap().contains("Empty"));
+}
+
+#[tokio::test]
+async fn create_dashboard_invalid_layout() {
+    let server = MockServer::start().await;
+    let ctx = mock_context(&server).await;
+    let out = tools::create_dashboard(
+        ctx,
+        "Test Dashboard".into(),
+        "invalid_layout".into(),
+        vec![],
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(out["status"], "error");
+    assert!(out["error"]
+        .as_str()
+        .unwrap()
+        .contains("Invalid dashboard layout"));
+}
+
+#[tokio::test]
+async fn create_dashboard_empty_title() {
+    let server = MockServer::start().await;
+    let ctx = mock_context(&server).await;
+    let out = tools::create_dashboard(ctx, "  ".into(), "ordered".into(), vec![], None)
+        .await
+        .unwrap();
+    assert_eq!(out["status"], "error");
+    assert!(out["error"].as_str().unwrap().contains("Empty"));
+}

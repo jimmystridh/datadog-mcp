@@ -2,8 +2,9 @@
 
 use crate::ids::DashboardId;
 use crate::response::{simple_success_with_fields, tool_error};
-use crate::sanitize::{sanitize_message, sanitize_name, sanitize_optional, MAX_MESSAGE_LENGTH, MAX_NAME_LENGTH};
+use crate::sanitize::{sanitize_name, sanitize_optional, MAX_MESSAGE_LENGTH, MAX_NAME_LENGTH};
 use crate::state::ToolContext;
+use crate::input_validation::{validate_dashboard_layout, validate_dashboard_title};
 use datadog_api::models::*;
 use serde_json::{json, Value};
 use tracing::info;
@@ -78,6 +79,14 @@ pub async fn create_dashboard(
 ) -> anyhow::Result<Value> {
     let title = sanitize_name(&title);
     let description = sanitize_optional(description, MAX_MESSAGE_LENGTH);
+
+    // Validate inputs
+    if let Err(e) = validate_dashboard_title(&title) {
+        return Ok(tool_error("create_dashboard", e));
+    }
+    if let Err(e) = validate_dashboard_layout(&layout_type) {
+        return Ok(tool_error("create_dashboard", e));
+    }
 
     info!("Creating dashboard: {}", title);
 

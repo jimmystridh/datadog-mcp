@@ -2,6 +2,7 @@
 pub mod cache;
 pub mod errors;
 pub mod ids;
+pub mod input_validation;
 pub mod output;
 #[macro_use]
 pub mod response;

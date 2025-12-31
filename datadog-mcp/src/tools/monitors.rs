@@ -1,9 +1,10 @@
 //! Monitor tools
 
 use crate::response::{simple_success_with_fields, tool_error};
-use crate::sanitize::{sanitize_message, sanitize_name, sanitize_optional, sanitize_query, MAX_MESSAGE_LENGTH, MAX_NAME_LENGTH, MAX_QUERY_LENGTH};
+use crate::sanitize::{sanitize_name, sanitize_optional, sanitize_query, MAX_MESSAGE_LENGTH, MAX_NAME_LENGTH, MAX_QUERY_LENGTH};
 use crate::state::ToolContext;
 use crate::tool_inputs::{MonitorId, MonitorOptions};
+use crate::input_validation::{validate_monitor_name, validate_monitor_query, validate_monitor_type};
 use datadog_api::models::*;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -77,6 +78,17 @@ pub async fn create_monitor(
     let name = sanitize_name(&name);
     let query = sanitize_query(&query);
     let message = sanitize_optional(message, MAX_MESSAGE_LENGTH);
+
+    // Validate inputs
+    if let Err(e) = validate_monitor_name(&name) {
+        return Ok(tool_error("create_monitor", e));
+    }
+    if let Err(e) = validate_monitor_type(&monitor_type) {
+        return Ok(tool_error("create_monitor", e));
+    }
+    if let Err(e) = validate_monitor_query(&query) {
+        return Ok(tool_error("create_monitor", e));
+    }
 
     info!("Creating monitor: {}", name);
 

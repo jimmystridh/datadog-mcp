@@ -2,6 +2,7 @@
 
 use crate::ids::DowntimeId;
 use crate::response::{simple_success_with_fields, tool_error};
+use crate::sanitize::{sanitize_optional, sanitize_tags, MAX_MESSAGE_LENGTH};
 use crate::state::ToolContext;
 use datadog_api::models::*;
 use serde_json::{json, Value};
@@ -43,6 +44,9 @@ pub async fn create_downtime(
     end: Option<i64>,
     message: Option<String>,
 ) -> anyhow::Result<Value> {
+    let scope = sanitize_tags(scope);
+    let message = sanitize_optional(message, MAX_MESSAGE_LENGTH);
+
     info!("Creating downtime for scope: {:?}", scope);
 
     let request = DowntimeCreateRequest {

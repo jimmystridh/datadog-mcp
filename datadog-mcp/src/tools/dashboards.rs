@@ -2,6 +2,7 @@
 
 use crate::ids::DashboardId;
 use crate::response::{simple_success_with_fields, tool_error};
+use crate::sanitize::{sanitize_message, sanitize_name, sanitize_optional, MAX_MESSAGE_LENGTH, MAX_NAME_LENGTH};
 use crate::state::ToolContext;
 use datadog_api::models::*;
 use serde_json::{json, Value};
@@ -75,6 +76,9 @@ pub async fn create_dashboard(
     widgets: Vec<Value>,
     description: Option<String>,
 ) -> anyhow::Result<Value> {
+    let title = sanitize_name(&title);
+    let description = sanitize_optional(description, MAX_MESSAGE_LENGTH);
+
     info!("Creating dashboard: {}", title);
 
     let dashboard = Dashboard {
@@ -113,6 +117,8 @@ pub async fn update_dashboard(
     title: Option<String>,
     widgets: Option<Vec<Value>>,
 ) -> anyhow::Result<Value> {
+    let title = sanitize_optional(title, MAX_NAME_LENGTH);
+
     info!("Updating dashboard: {}", dashboard_id);
 
     let api = ctx.dashboards_api();

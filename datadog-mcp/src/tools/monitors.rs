@@ -1,6 +1,7 @@
 //! Monitor tools
 
 use crate::response::{simple_success_with_fields, tool_error};
+use crate::sanitize::{sanitize_message, sanitize_name, sanitize_optional, sanitize_query, MAX_MESSAGE_LENGTH, MAX_NAME_LENGTH, MAX_QUERY_LENGTH};
 use crate::state::ToolContext;
 use crate::tool_inputs::{MonitorId, MonitorOptions};
 use datadog_api::models::*;
@@ -73,6 +74,10 @@ pub async fn create_monitor(
     message: Option<String>,
     options: Option<MonitorOptions>,
 ) -> anyhow::Result<Value> {
+    let name = sanitize_name(&name);
+    let query = sanitize_query(&query);
+    let message = sanitize_optional(message, MAX_MESSAGE_LENGTH);
+
     info!("Creating monitor: {}", name);
 
     let request = MonitorCreateRequest {
@@ -111,6 +116,10 @@ pub async fn update_monitor(
     message: Option<String>,
     options: Option<MonitorOptions>,
 ) -> anyhow::Result<Value> {
+    let name = sanitize_optional(name, MAX_NAME_LENGTH);
+    let query = sanitize_optional(query, MAX_QUERY_LENGTH);
+    let message = sanitize_optional(message, MAX_MESSAGE_LENGTH);
+
     info!("Updating monitor: {}", monitor_id.0);
 
     let request = MonitorUpdateRequest {

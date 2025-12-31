@@ -1,6 +1,7 @@
 //! Synthetics testing tools
 
 use crate::ids::SyntheticsTestId;
+use crate::sanitize::{sanitize_name, sanitize_optional, sanitize_tags, MAX_MESSAGE_LENGTH, MAX_NAME_LENGTH};
 use crate::state::ToolContext;
 use datadog_api::models::*;
 use serde_json::{json, Value};
@@ -119,6 +120,10 @@ pub async fn create_synthetics_test(
     tags: Option<Vec<String>>,
     tick_every: Option<i32>,
 ) -> anyhow::Result<Value> {
+    let name = sanitize_name(&name);
+    let message = sanitize_optional(message, MAX_MESSAGE_LENGTH);
+    let tags = tags.map(sanitize_tags);
+
     info!("Creating Synthetics test: {}", name);
 
     // Validate test_type
@@ -202,6 +207,10 @@ pub async fn update_synthetics_test(
     tags: Option<Vec<String>>,
     tick_every: Option<i32>,
 ) -> anyhow::Result<Value> {
+    let name = sanitize_optional(name, MAX_NAME_LENGTH);
+    let message = sanitize_optional(message, MAX_MESSAGE_LENGTH);
+    let tags = tags.map(sanitize_tags);
+
     info!("Updating Synthetics test: {}", public_id);
 
     let api = ctx.synthetics_api();

@@ -4,6 +4,7 @@ mod ids;
 mod output;
 #[macro_use]
 pub mod response;
+mod sanitize;
 mod server;
 mod state;
 mod tool_inputs;

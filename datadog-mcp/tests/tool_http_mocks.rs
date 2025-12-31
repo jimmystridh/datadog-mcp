@@ -1,7 +1,7 @@
 use datadog_api::{config::DatadogConfig, DatadogClient};
 use datadog_mcp::state::ToolContext;
 use datadog_mcp::tool_inputs::MonitorId;
-use datadog_mcp::{tools, tools_part2};
+use datadog_mcp::tools;
 use serde_json::json;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -87,7 +87,7 @@ async fn search_logs_success() {
         .await;
 
     let ctx = mock_context(&server).await;
-    let out = tools_part2::search_logs(
+    let out = tools::search_logs(
         ctx,
         "env:prod".into(),
         "now-1h".into(),

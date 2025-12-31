@@ -1,11 +1,11 @@
+use crate::errors::to_mcp_error;
 use crate::output::{Formattable, OutputFormat};
 use crate::state::ServerState;
 use crate::tool_inputs::*;
 use crate::tools;
-use crate::tools_part2;
 use rmcp::{
     model::{
-        CallToolResult, Content, ErrorCode, ErrorData, Implementation, InitializeRequestParam,
+        CallToolResult, Content, ErrorData, Implementation, InitializeRequestParam,
         InitializeResult, ProtocolVersion, ServerCapabilities, ServerInfo,
     },
     service::RequestContext,
@@ -14,44 +14,10 @@ use rmcp::{
 use serde::Serialize;
 use std::sync::Arc;
 
-fn to_mcp_error(err: anyhow::Error) -> ErrorData {
-    ErrorData::new(ErrorCode(-32603), err.to_string(), None)
-}
-
 /// Format response using the specified format with fallback to JSON
 fn format_response<T: Serialize + Formattable>(data: &T, format: OutputFormat) -> String {
     data.format(format)
         .unwrap_or_else(|_| serde_json::to_string_pretty(data).unwrap_or_default())
-}
-
-#[allow(dead_code)]
-fn api_error(code: &str, operation: &str, error: impl std::fmt::Display) -> ErrorData {
-    ErrorData::new(
-        ErrorCode(-32603),
-        format!(
-            "{}: Failed to {}. {}. Please check your API credentials and permissions.",
-            code, operation, error
-        ),
-        None,
-    )
-}
-
-#[allow(dead_code)]
-fn validation_error(message: &str) -> ErrorData {
-    ErrorData::new(
-        ErrorCode(-32602),
-        format!("VALIDATION_ERROR: {}", message),
-        None,
-    )
-}
-
-#[allow(dead_code)]
-fn not_found_error(resource: &str, id: &str) -> ErrorData {
-    ErrorData::new(
-        ErrorCode(-32602),
-        format!("NOT_FOUND: {} with ID '{}' not found", resource, id),
-        None,
-    )
 }
 
 #[derive(Clone)]
@@ -287,7 +253,7 @@ impl DatadogMcpServer {
         &self,
         #[tool(aggr)] input: SearchLogsInput,
     ) -> Result<CallToolResult, ErrorData> {
-        let result = tools_part2::search_logs(
+        let result = tools::search_logs(
             self.state.tool_context(),
             input.query,
             input.from_time,
@@ -306,7 +272,7 @@ impl DatadogMcpServer {
         &self,
         #[tool(aggr)] input: GetEventsInput,
     ) -> Result<CallToolResult, ErrorData> {
-        let result = tools_part2::get_events(
+        let result = tools::get_events(
             self.state.tool_context(),
             input.start,
             input.end,
@@ -326,7 +292,7 @@ impl DatadogMcpServer {
 
     #[tool(description = "Get infrastructure and hosts information")]
     pub async fn get_infrastructure(&self) -> Result<CallToolResult, ErrorData> {
-        let result = tools_part2::get_infrastructure(self.state.tool_context())
+        let result = tools::get_infrastructure(self.state.tool_context())
             .await
             .map_err(to_mcp_error)?;
 
@@ -339,7 +305,7 @@ impl DatadogMcpServer {
         &self,
         #[tool(aggr)] input: GetTagsInput,
     ) -> Result<CallToolResult, ErrorData> {
-        let result = tools_part2::get_tags(self.state.tool_context(), input.source)
+        let result = tools::get_tags(self.state.tool_context(), input.source)
             .await
             .map_err(to_mcp_error)?;
 
@@ -353,7 +319,7 @@ impl DatadogMcpServer {
         #[tool(aggr)] input: GetKubernetesDeploymentsInput,
     ) -> Result<CallToolResult, ErrorData> {
         let result =
-            tools_part2::get_kubernetes_deployments(self.state.tool_context(), input.namespace)
+            tools::get_kubernetes_deployments(self.state.tool_context(), input.namespace)
                 .await
                 .map_err(to_mcp_error)?;
 
@@ -363,7 +329,7 @@ impl DatadogMcpServer {
 
     #[tool(description = "Get scheduled downtimes")]
     pub async fn get_downtimes(&self) -> Result<CallToolResult, ErrorData> {
-        let result = tools_part2::get_downtimes(self.state.tool_context())
+        let result = tools::get_downtimes(self.state.tool_context())
             .await
             .map_err(to_mcp_error)?;
 
@@ -376,7 +342,7 @@ impl DatadogMcpServer {
         &self,
         #[tool(aggr)] input: CreateDowntimeInput,
     ) -> Result<CallToolResult, ErrorData> {
-        let result = tools_part2::create_downtime(
+        let result = tools::create_downtime(
             self.state.tool_context(),
             input.scope,
             input.start,
@@ -395,7 +361,7 @@ impl DatadogMcpServer {
         &self,
         #[tool(aggr)] input: CancelDowntimeInput,
     ) -> Result<CallToolResult, ErrorData> {
-        let result = tools_part2::cancel_downtime(self.state.tool_context(), input.downtime_id)
+        let result = tools::cancel_downtime(self.state.tool_context(), input.downtime_id)
             .await
             .map_err(to_mcp_error)?;
 
@@ -409,7 +375,7 @@ impl DatadogMcpServer {
 
     #[tool(description = "Get all Synthetics tests")]
     pub async fn get_synthetics_tests(&self) -> Result<CallToolResult, ErrorData> {
-        let result = tools_part2::get_synthetics_tests(self.state.tool_context())
+        let result = tools::get_synthetics_tests(self.state.tool_context())
             .await
             .map_err(to_mcp_error)?;
 
@@ -419,7 +385,7 @@ impl DatadogMcpServer {
 
     #[tool(description = "Get all available Synthetics testing locations")]
     pub async fn get_synthetics_locations(&self) -> Result<CallToolResult, ErrorData> {
-        let result = tools_part2::get_synthetics_locations(self.state.tool_context())
+        let result = tools::get_synthetics_locations(self.state.tool_context())
             .await
             .map_err(to_mcp_error)?;
 
@@ -432,7 +398,7 @@ impl DatadogMcpServer {
         &self,
         #[tool(aggr)] input: CreateSyntheticsTestInput,
     ) -> Result<CallToolResult, ErrorData> {
-        let result = tools_part2::create_synthetics_test(
+        let result = tools::create_synthetics_test(
             self.state.tool_context(),
             input.name,
             input.test_type,
@@ -454,7 +420,7 @@ impl DatadogMcpServer {
         &self,
         #[tool(aggr)] input: UpdateSyntheticsTestInput,
     ) -> Result<CallToolResult, ErrorData> {
-        let result = tools_part2::update_synthetics_test(
+        let result = tools::update_synthetics_test(
             self.state.tool_context(),
             input.public_id,
             input.name,
@@ -477,7 +443,7 @@ impl DatadogMcpServer {
         #[tool(aggr)] input: TriggerSyntheticsTestsInput,
     ) -> Result<CallToolResult, ErrorData> {
         let result =
-            tools_part2::trigger_synthetics_tests(self.state.tool_context(), input.test_ids)
+            tools::trigger_synthetics_tests(self.state.tool_context(), input.test_ids)
                 .await
                 .map_err(to_mcp_error)?;
 
@@ -491,7 +457,7 @@ impl DatadogMcpServer {
 
     #[tool(description = "Get security monitoring rules")]
     pub async fn get_security_rules(&self) -> Result<CallToolResult, ErrorData> {
-        let result = tools_part2::get_security_rules(self.state.tool_context())
+        let result = tools::get_security_rules(self.state.tool_context())
             .await
             .map_err(to_mcp_error)?;
 
@@ -504,7 +470,7 @@ impl DatadogMcpServer {
         &self,
         #[tool(aggr)] input: GetIncidentsInput,
     ) -> Result<CallToolResult, ErrorData> {
-        let result = tools_part2::get_incidents(self.state.tool_context(), input.page_size)
+        let result = tools::get_incidents(self.state.tool_context(), input.page_size)
             .await
             .map_err(to_mcp_error)?;
 
@@ -514,7 +480,7 @@ impl DatadogMcpServer {
 
     #[tool(description = "Get Service Level Objectives")]
     pub async fn get_slos(&self) -> Result<CallToolResult, ErrorData> {
-        let result = tools_part2::get_slos(self.state.tool_context())
+        let result = tools::get_slos(self.state.tool_context())
             .await
             .map_err(to_mcp_error)?;
 
@@ -524,7 +490,7 @@ impl DatadogMcpServer {
 
     #[tool(description = "Get Datadog notebooks")]
     pub async fn get_notebooks(&self) -> Result<CallToolResult, ErrorData> {
-        let result = tools_part2::get_notebooks(self.state.tool_context())
+        let result = tools::get_notebooks(self.state.tool_context())
             .await
             .map_err(to_mcp_error)?;
 
@@ -538,7 +504,7 @@ impl DatadogMcpServer {
 
     #[tool(description = "Get teams")]
     pub async fn get_teams(&self) -> Result<CallToolResult, ErrorData> {
-        let result = tools_part2::get_teams(self.state.tool_context())
+        let result = tools::get_teams(self.state.tool_context())
             .await
             .map_err(to_mcp_error)?;
 
@@ -548,7 +514,7 @@ impl DatadogMcpServer {
 
     #[tool(description = "Get users")]
     pub async fn get_users(&self) -> Result<CallToolResult, ErrorData> {
-        let result = tools_part2::get_users(self.state.tool_context())
+        let result = tools::get_users(self.state.tool_context())
             .await
             .map_err(to_mcp_error)?;
 
@@ -565,7 +531,7 @@ impl DatadogMcpServer {
         &self,
         #[tool(aggr)] input: AnalyzeDataInput,
     ) -> Result<CallToolResult, ErrorData> {
-        let result = tools_part2::analyze_data(input.filepath, input.analysis_type)
+        let result = tools::analyze_data(input.filepath, input.analysis_type)
             .await
             .map_err(to_mcp_error)?;
 
@@ -578,7 +544,7 @@ impl DatadogMcpServer {
         &self,
         #[tool(aggr)] input: CleanupCacheInput,
     ) -> Result<CallToolResult, ErrorData> {
-        let result = tools_part2::cleanup_cache_tool(input.older_than_hours)
+        let result = tools::cleanup_cache_tool(input.older_than_hours)
             .await
             .map_err(to_mcp_error)?;
 

@@ -137,10 +137,10 @@ fn test_create_synthetics_test_input_schema() {
 
 #[test]
 fn test_update_synthetics_test_input_optional_fields() {
-    use datadog_mcp::tool_inputs::UpdateSyntheticsTestInput;
+    use datadog_mcp::tool_inputs::{SyntheticsTestId, UpdateSyntheticsTestInput};
 
     let input = UpdateSyntheticsTestInput {
-        public_id: "abc-123".to_string(),
+        public_id: SyntheticsTestId("abc-123".to_string()),
         name: Some("Updated Name".to_string()),
         url: None,
         locations: None,
@@ -149,7 +149,7 @@ fn test_update_synthetics_test_input_optional_fields() {
         tick_every: None,
     };
 
-    assert_eq!(input.public_id, "abc-123");
+    assert_eq!(input.public_id.0, "abc-123");
     assert_eq!(input.name, Some("Updated Name".to_string()));
     assert!(input.url.is_none());
 }

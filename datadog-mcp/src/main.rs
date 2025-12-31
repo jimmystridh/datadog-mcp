@@ -1,4 +1,6 @@
 pub mod cache;
+mod errors;
+mod ids;
 mod output;
 #[macro_use]
 pub mod response;
@@ -6,7 +8,6 @@ mod server;
 mod state;
 mod tool_inputs;
 mod tools;
-mod tools_part2;
 
 use anyhow::Result;
 use clap::Parser;

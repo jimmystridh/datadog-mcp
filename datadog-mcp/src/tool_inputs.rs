@@ -1,6 +1,12 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+// Re-export IDs for external use
+pub use crate::ids::{
+    DashboardId, DowntimeId, IncidentId, MonitorId, NotebookId, SloId, SyntheticsTestId, TeamId,
+    UserId,
+};
+
 // ============================================================================
 // METRICS & MONITORING TOOL INPUTS
 // ============================================================================
@@ -74,7 +80,7 @@ pub struct DeleteMonitorInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct GetDashboardInput {
     #[schemars(description = "Dashboard ID")]
-    pub dashboard_id: String,
+    pub dashboard_id: DashboardId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -92,7 +98,7 @@ pub struct CreateDashboardInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct UpdateDashboardInput {
     #[schemars(description = "Dashboard ID")]
-    pub dashboard_id: String,
+    pub dashboard_id: DashboardId,
     #[schemars(description = "Dashboard title")]
     pub title: Option<String>,
     #[schemars(description = "Dashboard widgets")]
@@ -102,7 +108,7 @@ pub struct UpdateDashboardInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DeleteDashboardInput {
     #[schemars(description = "Dashboard ID")]
-    pub dashboard_id: String,
+    pub dashboard_id: DashboardId,
 }
 
 // ============================================================================
@@ -158,7 +164,7 @@ pub struct CreateDowntimeInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct CancelDowntimeInput {
     #[schemars(description = "Downtime ID to cancel")]
-    pub downtime_id: i64,
+    pub downtime_id: DowntimeId,
 }
 
 // ============================================================================
@@ -196,13 +202,13 @@ pub struct CreateSyntheticsTestInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct TriggerSyntheticsTestsInput {
     #[schemars(description = "List of Synthetics test public IDs to trigger")]
-    pub test_ids: Vec<String>,
+    pub test_ids: Vec<SyntheticsTestId>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct UpdateSyntheticsTestInput {
     #[schemars(description = "Public ID of the test to update")]
-    pub public_id: String,
+    pub public_id: SyntheticsTestId,
     #[schemars(description = "Optional new name")]
     pub name: Option<String>,
     #[schemars(description = "Optional new URL")]
@@ -339,7 +345,7 @@ mod tests {
 
         let input: UpdateSyntheticsTestInput = serde_json::from_str(json).unwrap();
 
-        assert_eq!(input.public_id, "abc-123-xyz");
+        assert_eq!(input.public_id.0, "abc-123-xyz");
         assert_eq!(input.name, Some("Updated Name".to_string()));
         assert!(input.url.is_none());
         assert!(input.locations.is_none());
@@ -392,15 +398,6 @@ mod tests {
 
         assert_eq!(deserialized.filepath, "/tmp/data.json");
         assert_eq!(deserialized.analysis_type, Some("summary".to_string()));
-    }
-}
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(transparent)]
-pub struct MonitorId(pub i64);
-
-impl std::fmt::Display for MonitorId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
     }
 }
 

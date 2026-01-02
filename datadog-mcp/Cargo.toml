@@ -24,7 +24,7 @@ keyring = ["datadog-api/keyring"]
 full = ["toon", "keyring"]
 
 [dependencies]
-datadog-api = { path = "../datadog-api" }
+datadog-api = { path = "../datadog-api", default-features = false }
 
 # MCP Server SDK
 rmcp = { git = "https://github.com/modelcontextprotocol/rust-sdk.git", rev = "8a577659f01917289064c0a3c753392b44305ef4", features = ["server", "transport-io"] }

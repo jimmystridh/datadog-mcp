@@ -3,6 +3,8 @@
 //! Provides validation and sanitization for strings that will be sent to
 //! external APIs or stored/logged.
 
+#![allow(dead_code)] // Sanitization functions defined for future use
+
 /// Maximum length for user-provided names (monitor names, dashboard titles, etc.)
 pub const MAX_NAME_LENGTH: usize = 256;
 

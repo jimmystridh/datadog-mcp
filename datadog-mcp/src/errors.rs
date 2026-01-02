@@ -1,5 +1,7 @@
 //! MCP error codes and helpers for consistent error responses
 
+#![allow(dead_code)] // Helper functions defined for future use
+
 use rmcp::model::{ErrorCode, ErrorData};
 
 /// MCP-compliant error codes for Datadog MCP Server

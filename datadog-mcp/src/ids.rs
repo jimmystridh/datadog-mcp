@@ -2,6 +2,8 @@
 //!
 //! These newtypes prevent accidentally mixing up IDs from different resource types.
 
+#![allow(dead_code)] // Some IDs are defined for future use
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;

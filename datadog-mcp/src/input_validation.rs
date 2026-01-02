@@ -6,6 +6,7 @@
 use thiserror::Error;
 
 #[derive(Debug, Error)]
+#[allow(dead_code)] // Variants defined for future use
 pub enum ValidationError {
     #[error("Invalid monitor type '{0}'. Valid types: {1}")]
     InvalidMonitorType(String, String),

@@ -213,7 +213,7 @@ mod tests {
 
     #[test]
     fn test_response_size_thresholds() {
-        assert!(RESPONSE_SIZE_WARN_THRESHOLD < RESPONSE_SIZE_MAX);
+        const _: () = assert!(RESPONSE_SIZE_WARN_THRESHOLD < RESPONSE_SIZE_MAX);
         assert_eq!(RESPONSE_SIZE_WARN_THRESHOLD, 1024 * 1024);
         assert_eq!(RESPONSE_SIZE_MAX, 10 * 1024 * 1024);
     }

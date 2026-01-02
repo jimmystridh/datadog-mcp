@@ -8,6 +8,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 // Re-export IDs for external use
+#[allow(unused_imports)]
 pub use crate::ids::{
     DashboardId, DowntimeId, IncidentId, MonitorId, NotebookId, SloId, SyntheticsTestId, TeamId,
     UserId,

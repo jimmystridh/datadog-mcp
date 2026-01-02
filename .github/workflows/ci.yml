@@ -12,8 +12,29 @@ permissions:
   contents: write
 
 jobs:
+  lint-and-test:
+    name: Lint and Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
+
+      - name: Run Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Run tests
+        run: cargo test --all --tests -- --nocapture
+
   build:
     name: Build (${{ matrix.target }})
+    needs: lint-and-test
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -59,17 +80,10 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-          components: clippy
 
       - name: Install Cross
         if: matrix.use_cross == true
         run: cargo install cross --git https://github.com/cross-rs/cross --locked
-
-      - name: Run Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
-
-      - name: Run tests
-        run: cargo test --all --tests -- --nocapture
 
       - name: Set PERL for OpenSSL (Windows only)
         if: runner.os == 'Windows'
@@ -78,10 +92,6 @@ jobs:
           $perl = (& where.exe perl)[0]
           "PERL=$perl" | Out-File -FilePath $env:GITHUB_ENV -Append
           "OPENSSL_SRC_PERL=$perl" | Out-File -FilePath $env:GITHUB_ENV -Append
-
-      - name: Install system dependencies (Linux only)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
 
       - name: Build
         if: runner.os != 'Windows'

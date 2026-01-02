@@ -96,9 +96,11 @@ pub mod error;
 pub mod models;
 pub mod pagination;
 pub mod rate_limit;
+pub mod timestamp;
 
 pub use client::{CacheInfo, CachedResponse, DatadogClient};
 pub use config::{DatadogConfig, HttpConfig, RetryConfig};
 pub use error::{Error, Result};
 pub use pagination::{CursorParams, PageParams, PaginatedResponse, PaginationMeta};
 pub use rate_limit::{RateLimitConfig, RateLimiter};
+pub use timestamp::{TimestampMillis, TimestampNanos, TimestampSecs};

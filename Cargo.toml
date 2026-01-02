@@ -8,8 +8,10 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-authors = ["Datadog MCP Server"]
+authors = ["Jimmy Stridh"]
 license = "MIT"
+repository = "https://github.com/jimmystridh/datadog-mcp"
+homepage = "https://github.com/jimmystridh/datadog-mcp"
 
 [workspace.dependencies]
 # Async runtime (only features actually needed)

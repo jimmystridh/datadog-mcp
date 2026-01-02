@@ -4,6 +4,12 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Rust client library for the Datadog API with type-safe access to monitors, dashboards, metrics, logs, and more"
+readme = "README.md"
+keywords = ["datadog", "monitoring", "observability", "metrics", "api"]
+categories = ["api-bindings", "web-programming::http-client"]
 
 [features]
 default = ["keyring"]

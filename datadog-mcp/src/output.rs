@@ -31,8 +31,8 @@ pub trait Formattable: Serialize {
     where
         Self: Sized,
     {
-        let options = toon::Options::default();
-        Ok(toon::encode_to_string(self, &options)?)
+        let json_value = serde_json::to_value(self)?;
+        Ok(toon::encode(&json_value, None))
     }
 
     /// Format using the specified format

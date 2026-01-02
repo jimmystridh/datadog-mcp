@@ -1,127 +1,124 @@
-# Datadog MCP Server (Rust Implementation)
+# Datadog MCP Server
 
-A Model Context Protocol (MCP) server that provides programmatic access to Datadog's monitoring and observability platform through an AI-friendly interface, implemented in Rust.
+A high-performance [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that connects AI assistants to Datadog's monitoring and observability platform. Built in Rust for speed, reliability, and token efficiency.
 
-## Features
+```
+┌─────────────────┐     MCP/stdio      ┌──────────────────┐      HTTPS       ┌─────────────┐
+│  Claude/LLM     │◄──────────────────►│  datadog-mcp     │◄────────────────►│  Datadog    │
+│  Assistant      │   JSON or TOON     │  server          │   REST API       │  Platform   │
+└─────────────────┘                    └──────────────────┘                  └─────────────┘
+```
 
-- **31 MCP Tools** organized into 8 categories:
-  - Metrics & Monitoring (9 tools)
-  - Dashboards & Visualization (5 tools)
-  - Logs & Events (2 tools)
-  - Infrastructure & Tags (5 tools)
-  - Testing & Applications (1 tool)
-  - Security & Incidents (4 tools)
-  - Teams & Users (2 tools)
-  - Utilities (2 tools)
+## Highlights
 
-- **Async/Non-blocking Architecture** using Tokio
-- **Automatic Retry Logic** with exponential backoff for rate limiting
-- **Local JSON Caching** of all API responses
-- **Modular Design** with separate API client and MCP server crates
-- **Type-Safe** implementation using Rust's type system
+- **35+ MCP Tools** — Full coverage of Datadog's core APIs: metrics, monitors, dashboards, logs, synthetics, incidents, and more
+- **TOON Output Format** — Optional [Token-Oriented Object Notation](https://github.com/toon-format/toon) reduces token usage by 30-60% compared to JSON
+- **Async & Non-blocking** — Built on Tokio for high throughput and responsiveness
+- **Automatic Retry** — Exponential backoff handles rate limits gracefully
+- **Local Caching** — All API responses cached for analysis and replay
+- **Modular Architecture** — Standalone `datadog-api` crate usable in other Rust projects
 
-## Architecture
+## Quick Start
 
-The project is structured as a Rust workspace with two crates:
-
-1. **datadog-api** - A standalone Datadog API client library
-   - HTTP client with retry middleware
-   - Authentication and configuration management
-   - Type-safe API models and endpoints
-   - Can be used independently in other projects
-
-2. **datadog-mcp** - The MCP server implementation
-   - All 31 MCP tools
-   - Caching mechanism
-   - Tool registration and routing
-
-## Prerequisites
-
-- Rust 1.70+ (install from [rustup.rs](https://rustup.rs/))
-- Datadog API and Application keys
-- MCP-compatible client (VS Code, Claude Desktop, Cursor, etc.)
-
-## Installation
-
-### 1. Clone the repository
+### 1. Build
 
 ```bash
 git clone <repository-url>
-cd claude_jungle_anaconda
-```
-
-### 2. Configure environment variables
-
-Create a `.env` file in the project root:
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` and add your Datadog credentials:
-
-```env
-DD_API_KEY=your_api_key_here
-DD_APP_KEY=your_app_key_here
-DD_SITE=datadoghq.com  # or datadoghq.eu, us3.datadoghq.com, etc.
-```
-
-### 3. Build the project
-
-```bash
+cd datadog-mcp
 cargo build --release
 ```
 
-The binary will be available at `target/release/datadog-mcp`
-
-## Usage
-
-### Running the server
-
-The MCP server communicates via stdio:
+### 2. Configure
 
 ```bash
-./target/release/datadog-mcp
+export DD_API_KEY="your_api_key"
+export DD_APP_KEY="your_app_key"
+export DD_SITE="datadoghq.eu"  # or datadoghq.com, us3.datadoghq.com, etc.
+
+# Optional: store credentials in your system keyring (macOS Keychain, Windows Credential Manager, Secret Service)
+DD_PROFILE=default ./target/release/datadog-mcp --store-credentials
+# Afterwards you can unset the env vars; the server will read from keyring first, then ~/.datadog-mcp/credentials.json, then env vars.
 ```
 
-### MCP Client Configuration
+### 3. Run
 
-#### Claude Desktop
+```bash
+./target/release/datadog-mcp --format toon
+```
 
-Add to your Claude Desktop configuration (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
+## Configuration
+
+### Command-Line Options
+
+| Option | Values | Default | Description |
+|--------|--------|---------|-------------|
+| `--format` | `json`, `toon` | `toon` | Output format for MCP responses |
+
+### Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `DD_API_KEY` | Yes | Datadog API key |
+| `DD_APP_KEY` | Yes | Datadog Application key |
+| `DD_SITE` | No | Datadog site (default: `datadoghq.com`) |
+| `DD_PROFILE` | No | Credential profile name (used for keyring entry; default `default`) |
+| `RUST_LOG` | No | Log level: `error`, `warn`, `info`, `debug`, `trace` |
+
+### Credential Storage Order
+1. System keyring (`datadog-mcp` service, profile `DD_PROFILE` or `default`)
+2. `~/.datadog-mcp/credentials.json` (`{"api_key":"...","app_key":"...","site":"..."}`)
+3. Environment variables (`DD_API_KEY`, `DD_APP_KEY`, `DD_SITE`)
+
+### Supported Datadog Sites
+
+| Site | Domain |
+|------|--------|
+| US1 (default) | `datadoghq.com` |
+| US3 | `us3.datadoghq.com` |
+| US5 | `us5.datadoghq.com` |
+| EU | `datadoghq.eu` |
+| AP1 | `ap1.datadoghq.com` |
+| US1-FED | `ddog-gov.com` |
+
+## MCP Client Setup
+
+### Claude Desktop
+
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "datadog": {
-      "command": "/path/to/datadog-mcp/target/release/datadog-mcp",
+      "command": "/path/to/datadog-mcp",
+      "args": ["--format", "toon"],
       "env": {
         "DD_API_KEY": "your_api_key",
         "DD_APP_KEY": "your_app_key",
-        "DD_SITE": "datadoghq.com"
+        "DD_SITE": "datadoghq.eu"
       }
     }
   }
 }
 ```
 
-#### VS Code with Continue
+### Claude Code
 
-Add to your Continue configuration:
+Add to your project's `.mcp.json`:
 
 ```json
 {
-  "mcpServers": [
-    {
-      "name": "datadog",
-      "command": "/path/to/datadog-mcp/target/release/datadog-mcp",
+  "mcpServers": {
+    "datadog": {
+      "command": "/path/to/datadog-mcp",
+      "args": ["--format", "toon"],
       "env": {
         "DD_API_KEY": "your_api_key",
         "DD_APP_KEY": "your_app_key",
-        "DD_SITE": "datadoghq.com"
+        "DD_SITE": "datadoghq.eu"
       }
     }
-  ]
+  }
 }
 ```
 
@@ -129,223 +126,210 @@ Add to your Continue configuration:
 
 ### Metrics & Monitoring
 
-1. **validate_api_key** - Test API credentials
-2. **get_metrics** - Query time series data
-3. **search_metrics** - Find metrics by pattern
-4. **get_metric_metadata** - Retrieve metric metadata
-5. **get_monitors** - List monitoring alerts
-6. **get_monitor** - Fetch specific monitor details
-7. **create_monitor** - Create new monitoring alerts
-8. **update_monitor** - Modify existing monitors
-9. **delete_monitor** - Remove monitors
+| Tool | Description |
+|------|-------------|
+| `validate_api_key` | Verify API credentials |
+| `get_metrics` | Query time series data |
+| `search_metrics` | Find metrics by name pattern |
+| `get_metric_metadata` | Retrieve metric metadata |
+| `get_monitors` | List all monitors |
+| `get_monitor` | Get specific monitor by ID |
+| `create_monitor` | Create new monitor |
+| `update_monitor` | Modify existing monitor |
+| `delete_monitor` | Remove monitor |
 
-### Dashboards & Visualization
+### Dashboards
 
-10. **get_dashboards** - List all dashboards
-11. **get_dashboard** - Retrieve dashboard details
-12. **create_dashboard** - Build new dashboards
-13. **update_dashboard** - Modify existing dashboards
-14. **delete_dashboard** - Remove dashboards
+| Tool | Description |
+|------|-------------|
+| `get_dashboards` | List all dashboards |
+| `get_dashboard` | Get dashboard by ID |
+| `create_dashboard` | Create new dashboard |
+| `update_dashboard` | Modify existing dashboard |
+| `delete_dashboard` | Remove dashboard |
 
 ### Logs & Events
 
-15. **search_logs** - Query log entries
-16. **get_events** - Retrieve system events
+| Tool | Description |
+|------|-------------|
+| `search_logs` | Query log entries with filters |
+| `get_events` | Retrieve system events |
 
-### Infrastructure & Tags
+### Infrastructure
 
-17. **get_infrastructure** - Obtain host information
-18. **get_tags** - Obtain host tags
-19. **get_downtimes** - List scheduled downtimes
-20. **create_downtime** - Schedule maintenance windows
+| Tool | Description |
+|------|-------------|
+| `get_infrastructure` | Get host information |
+| `get_tags` | Retrieve host tags |
+| `get_kubernetes_deployments` | List K8s deployments |
 
-### Testing & Applications
+### Synthetics Testing
 
-21. **get_synthetics_tests** - Retrieve synthetic tests
+| Tool | Description |
+|------|-------------|
+| `get_synthetics_tests` | List all synthetic tests |
+| `get_synthetics_locations` | Get available test locations |
+| `create_synthetics_test` | Create API/HTTP test |
+| `update_synthetics_test` | Modify existing test |
+| `trigger_synthetics_tests` | Run tests on-demand |
+
+### Downtimes
+
+| Tool | Description |
+|------|-------------|
+| `get_downtimes` | List scheduled downtimes |
+| `create_downtime` | Schedule maintenance window |
+| `cancel_downtime` | Cancel scheduled downtime |
 
 ### Security & Incidents
 
-22. **get_security_rules** - Retrieve security monitoring rules
-23. **get_incidents** - Access incident data (with pagination)
-24. **get_slos** - Obtain Service Level Objectives
-25. **get_notebooks** - Retrieve Datadog notebooks
+| Tool | Description |
+|------|-------------|
+| `get_security_rules` | Retrieve security monitoring rules |
+| `get_incidents` | Access incident data |
+| `get_slos` | Get Service Level Objectives |
+| `get_notebooks` | Retrieve Datadog notebooks |
 
 ### Teams & Users
 
-26. **get_teams** - Access team information
-27. **get_users** - Retrieve user data
+| Tool | Description |
+|------|-------------|
+| `get_teams` | List teams |
+| `get_users` | List users |
 
 ### Utilities
 
-28. **analyze_data** - Analyze cached data (summary, stats, or trends)
-29. **cleanup_cache** - Remove old cache files
+| Tool | Description |
+|------|-------------|
+| `analyze_data` | Analyze cached data (summary, stats, trends) |
+| `cleanup_cache` | Remove old cache files |
+
+## Output Formats
+
+### JSON (Traditional)
+
+Standard JSON output, compatible with all systems:
+
+```json
+{
+  "status": "success",
+  "total_monitors": 42,
+  "monitors": [
+    {"id": 123, "name": "CPU Alert", "status": "OK"},
+    {"id": 124, "name": "Memory Alert", "status": "Alert"}
+  ]
+}
+```
+
+### TOON (Token-Efficient)
+
+[TOON format](https://github.com/toon-format/toon) optimizes for LLM consumption, reducing tokens by 30-60%:
+
+```
+status:success
+total_monitors:42
+monitors:[
+  {id:123 name:"CPU Alert" status:OK}
+  {id:124 name:"Memory Alert" status:Alert}
+]
+```
+
+TOON is the default format. Use `--format json` if you need standard JSON output.
 
 ## Caching
 
-All API responses are automatically cached to the `datadog_cache/` directory in JSON format. Cache files are named using the pattern:
+All API responses are cached locally for offline analysis and debugging:
 
 ```
-{prefix}_{timestamp}_{uuid}.json
+datadog_cache/
+├── monitors_1700000000_a1b2c3d4.toon
+├── dashboards_1700000001_e5f6g7h8.toon
+└── logs_1700000002_i9j0k1l2.json
 ```
 
-Use the `cleanup_cache` tool to remove old cache files:
+Cache files use the configured output format. Use `cleanup_cache` to remove old files:
 
 ```
 cleanup_cache(older_than_hours: 24)
 ```
 
+## Architecture
+
+```
+.
+├── datadog-mcp/          # MCP server (this binary)
+│   └── src/
+│       ├── main.rs       # Entry point, CLI parsing
+│       ├── server.rs     # MCP server & tool handlers
+│       ├── state.rs      # Server state & configuration
+│       ├── cache.rs      # Response caching
+│       └── tools/        # Tool implementations by domain
+│
+└── datadog-api/          # Standalone Rust API client
+    └── src/
+        ├── client.rs     # HTTP client with retry & rate limiting
+        ├── apis/         # API modules (monitors, dashboards, etc.)
+        └── models/       # Request/response types
+```
+
+The MCP server depends on the [`datadog-api`](datadog-api/) crate, which can also be used independently in other Rust projects. See the [datadog-api README](datadog-api/README.md) for library usage.
+
 ## Development
 
-### Project Structure
-
-```
-claude_jungle_anaconda/
-├── Cargo.toml              # Workspace configuration
-├── datadog-api/            # API client library
-│   ├── Cargo.toml
-│   └── src/
-│       ├── lib.rs
-│       ├── client.rs       # HTTP client with retry logic
-│       ├── config.rs       # Configuration management
-│       ├── error.rs        # Error types
-│       ├── models.rs       # API data models
-│       └── apis/           # API endpoint modules
-│           ├── metrics.rs
-│           ├── monitors.rs
-│           └── ...
-└── datadog-mcp/            # MCP server
-    ├── Cargo.toml
-    └── src/
-        ├── main.rs         # Server entry point
-        ├── cache.rs        # Caching implementation
-        ├── tools.rs        # Tool implementations (part 1)
-        └── tools_part2.rs  # Tool implementations (part 2)
-```
-
-### Building for Development
-
 ```bash
+# Build
 cargo build
-```
 
-### Running Tests
-
-```bash
+# Test
 cargo test
+
+# Run with debug logging
+RUST_LOG=debug cargo run -- --format json
+
+# Check formatting
+cargo fmt --check
+
+# Lint
+cargo clippy
 ```
 
-### Running with Debug Logging
+## Using datadog-api Independently
 
-```bash
-RUST_LOG=debug ./target/debug/datadog-mcp
-```
-
-## Using the Datadog API Client Independently
-
-The `datadog-api` crate can be used as a standalone library:
+The API client can be used as a standalone library:
 
 ```rust
-use datadog_api::{DatadogClient, DatadogConfig, apis::MetricsApi};
+use datadog_api::{DatadogClient, DatadogConfig};
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> anyhow::Result<()> {
     let config = DatadogConfig::from_env()?;
     let client = DatadogClient::new(config)?;
 
-    let metrics_api = MetricsApi::new(client);
-    let result = metrics_api.list_metrics("system.cpu").await?;
+    // Query metrics
+    let metrics = client.query_metrics(
+        "avg:system.cpu.user{*}",
+        now - 3600,
+        now
+    ).await?;
 
-    println!("{:?}", result);
+    println!("{:?}", metrics);
     Ok(())
 }
 ```
 
-## Error Handling
-
-All tools follow a consistent error handling pattern:
-
-- Successful operations return a JSON response with `"status": "success"`
-- Failed operations return a JSON response with `"status": "error"` and an `"error"` field containing the error message
-
-Example success response:
-
-```json
-{
-  "filepath": "datadog_cache/monitors_1699999999_abcd1234.json",
-  "summary": "Retrieved 42 monitors",
-  "total_monitors": 42,
-  "monitor_states": {
-    "OK": 38,
-    "Alert": 4
-  },
-  "alerting_count": 4,
-  "status": "success"
-}
-```
-
-Example error response:
-
-```json
-{
-  "error": "Failed to get monitors: API error: 401 - Unauthorized",
-  "status": "error"
-}
-```
-
-## Configuration
-
-### Environment Variables
-
-- `DD_API_KEY` (required) - API authentication credential
-- `DD_APP_KEY` (required) - Application-level authentication credential
-- `DD_SITE` (optional) - Regional endpoint (defaults to "datadoghq.com")
-  - US1: `datadoghq.com` (default)
-  - US3: `us3.datadoghq.com`
-  - US5: `us5.datadoghq.com`
-  - EU: `datadoghq.eu`
-  - AP1: `ap1.datadoghq.com`
-  - US1-FED: `ddog-gov.com`
-
-### Logging
-
-Set the `RUST_LOG` environment variable to control log verbosity:
-
-- `error` - Only errors
-- `warn` - Warnings and errors
-- `info` - Info, warnings, and errors (default)
-- `debug` - Debug info and above
-- `trace` - All logging
-
 ## Troubleshooting
 
-### "DD_API_KEY not set" error
-
-Make sure you have created a `.env` file with your credentials or set the environment variables.
-
-### "API validation failed: 403" error
-
-Check that your API and Application keys are correct and have the necessary permissions.
-
-### Connection timeouts
-
-The client has a 30-second timeout for HTTP requests. If you're experiencing timeouts, check your network connection and Datadog site configuration.
+| Error | Solution |
+|-------|----------|
+| `DD_API_KEY not set` | Set environment variables or create `.env` file |
+| `403 Forbidden` | Check API/App key permissions in Datadog |
+| `Connection timeout` | Verify `DD_SITE` matches your Datadog region |
+| `Rate limited` | Automatic retry handles this; reduce request frequency if persistent |
 
 ## License
 
 MIT
 
-## Contributing
+---
 
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## Comparison with Python Implementation
-
-This Rust implementation provides:
-
-- **Better Performance**: Async runtime with zero-cost abstractions
-- **Type Safety**: Compile-time guarantees prevent many runtime errors
-- **Smaller Memory Footprint**: More efficient resource usage
-- **Single Binary**: No Python runtime required
-- **Modular Design**: API client can be used independently
-
-The tool interface and functionality remain compatible with the original Python implementation.
+Built with Rust, [rmcp](https://github.com/modelcontextprotocol/rust-sdk), and [toon-rs](https://github.com/jimmystridh/toon-rs).

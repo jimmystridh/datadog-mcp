@@ -5,6 +5,11 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[features]
+default = ["keyring"]
+# Secure credential storage in system keyring
+keyring = ["dep:keyring"]
+
 [dependencies]
 tokio = { workspace = true }
 reqwest = { workspace = true }
@@ -18,7 +23,7 @@ chrono = { workspace = true }
 tracing = { workspace = true }
 regex = { workspace = true }
 zeroize = { workspace = true }
-keyring = { workspace = true }
+keyring = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio-test = "0.4"

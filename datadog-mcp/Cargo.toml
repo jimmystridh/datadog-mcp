@@ -9,6 +9,15 @@ license.workspace = true
 name = "datadog-mcp"
 path = "src/main.rs"
 
+[features]
+default = ["toon", "keyring"]
+# TOON format for token-efficient LLM output
+toon = ["dep:toon"]
+# Secure credential storage in system keyring
+keyring = ["datadog-api/keyring"]
+# All features enabled
+full = ["toon", "keyring"]
+
 [dependencies]
 datadog-api = { path = "../datadog-api" }
 
@@ -34,8 +43,8 @@ clap = { version = "4.5", features = ["derive"] }
 # JSON Schema generation for tool input schemas
 schemars = { version = "0.8", features = ["derive"] }
 
-# TOON format for token-efficient LLM output
-toon = { path = "/Users/js/code/3rd/toon/toon-rs/crates/toon" }
+# TOON format for token-efficient LLM output (optional)
+toon = { path = "/Users/js/code/3rd/toon/toon-rs/crates/toon", optional = true }
 
 [dev-dependencies]
 tempfile = "3.10"

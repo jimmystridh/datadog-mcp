@@ -25,10 +25,12 @@ use tracing_subscriber::EnvFilter;
 #[command(about = "Datadog MCP Server - Model Context Protocol server for Datadog API", long_about = None)]
 struct Args {
     /// Output format for MCP responses (json or toon)
-    #[arg(long, default_value = "toon", value_parser = parse_format)]
+    #[cfg_attr(feature = "toon", arg(long, default_value = "toon", value_parser = parse_format))]
+    #[cfg_attr(not(feature = "toon"), arg(long, default_value = "json", value_parser = parse_format))]
     format: OutputFormat,
 
     /// Store credentials from env or file into the system keyring instead of starting the server
+    #[cfg(feature = "keyring")]
     #[arg(long)]
     store_credentials: bool,
 }
@@ -36,8 +38,12 @@ struct Args {
 fn parse_format(s: &str) -> Result<OutputFormat, String> {
     match s.to_lowercase().as_str() {
         "json" => Ok(OutputFormat::Json),
+        #[cfg(feature = "toon")]
         "toon" => Ok(OutputFormat::Toon),
+        #[cfg(feature = "toon")]
         _ => Err(format!("Invalid format '{}'. Must be 'json' or 'toon'", s)),
+        #[cfg(not(feature = "toon"))]
+        _ => Err(format!("Invalid format '{}'. Must be 'json'", s)),
     }
 }
 
@@ -66,6 +72,7 @@ async fn main() -> Result<()> {
     let config = datadog_api::config::DatadogConfig::from_env_or_file()?;
 
     // If requested, store credentials in keyring and exit
+    #[cfg(feature = "keyring")]
     if args.store_credentials {
         config.store_in_keyring()?;
         info!("Stored Datadog credentials in keyring");

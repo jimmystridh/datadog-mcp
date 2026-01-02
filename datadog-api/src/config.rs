@@ -1,3 +1,4 @@
+#[cfg(feature = "keyring")]
 use keyring::Entry;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -157,6 +158,7 @@ impl DatadogConfig {
         if let Ok(file_cfg) = Self::from_credentials_file() {
             return Ok(file_cfg);
         }
+        #[cfg(feature = "keyring")]
         if let Ok(keyring_cfg) = Self::from_keyring() {
             return Ok(keyring_cfg);
         }
@@ -187,6 +189,7 @@ impl DatadogConfig {
     /// Load configuration from the system keyring entry, if present.
     ///
     /// Profile defaults to `DD_PROFILE` or `default`.
+    #[cfg(feature = "keyring")]
     pub fn from_keyring() -> crate::Result<Self> {
         let profile = std::env::var("DD_PROFILE").unwrap_or_else(|_| "default".to_string());
         let entry = Entry::new(KEYRING_SERVICE, &profile)
@@ -204,6 +207,7 @@ impl DatadogConfig {
     /// Store the current configuration in the system keyring entry.
     ///
     /// Profile defaults to `DD_PROFILE` or `default`.
+    #[cfg(feature = "keyring")]
     pub fn store_in_keyring(&self) -> crate::Result<()> {
         let profile = std::env::var("DD_PROFILE").unwrap_or_else(|_| "default".to_string());
         let entry = Entry::new(KEYRING_SERVICE, &profile)
@@ -274,6 +278,7 @@ struct FileCredentials {
     site: Option<String>,
 }
 
+#[cfg(feature = "keyring")]
 const KEYRING_SERVICE: &str = "datadog-mcp";
 
 #[cfg(test)]

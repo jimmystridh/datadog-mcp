@@ -83,6 +83,7 @@ pub async fn store_data_in<T: Serialize + Formattable>(
     let unique_id = Uuid::new_v4().to_string()[..8].to_string();
     let extension = match format {
         OutputFormat::Json => "json",
+        #[cfg(feature = "toon")]
         OutputFormat::Toon => "toon",
     };
     let filename = format!("{}_{}_{}.{}", prefix, timestamp, unique_id, extension);
@@ -145,7 +146,8 @@ pub async fn load_data(filepath: &str) -> Result<serde_json::Value> {
     let content = fs::read_to_string(filepath).await?;
     let path = PathBuf::from(filepath);
 
-    let data = match path.extension().and_then(|s| s.to_str()) {
+    let data: serde_json::Value = match path.extension().and_then(|s| s.to_str()) {
+        #[cfg(feature = "toon")]
         Some("toon") => {
             // Decode TOON format
             let options = toon::Options::default();

@@ -14,6 +14,7 @@ pub enum OutputFormat {
     #[default]
     Json,
     /// TOON format - optimized for LLM token efficiency
+    #[cfg(feature = "toon")]
     Toon,
 }
 
@@ -25,6 +26,7 @@ pub trait Formattable: Serialize {
     }
 
     /// Format as TOON (token-efficient for LLMs)
+    #[cfg(feature = "toon")]
     fn format_toon(&self) -> Result<String>
     where
         Self: Sized,
@@ -40,6 +42,7 @@ pub trait Formattable: Serialize {
     {
         match format {
             OutputFormat::Json => self.format_json(),
+            #[cfg(feature = "toon")]
             OutputFormat::Toon => self.format_toon(),
         }
     }
@@ -74,6 +77,7 @@ mod tests {
         assert!(json.contains("42"));
     }
 
+    #[cfg(feature = "toon")]
     #[test]
     fn test_toon_formatting() {
         let data = TestData {
@@ -88,6 +92,7 @@ mod tests {
         assert!(toon.len() < json.len());
     }
 
+    #[cfg(feature = "toon")]
     #[test]
     fn test_format_enum() {
         let data = TestData {

@@ -1,0 +1,57 @@
+[package]
+name = "datadog-mcp"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "MCP server that connects AI assistants to Datadog monitoring and observability platform"
+keywords = ["datadog", "mcp", "model-context-protocol", "ai", "monitoring"]
+categories = ["command-line-utilities", "development-tools"]
+
+[[bin]]
+name = "datadog-mcp"
+path = "src/main.rs"
+
+[features]
+default = ["toon", "keyring"]
+# TOON format for token-efficient LLM output
+toon = ["dep:toon"]
+# Secure credential storage in system keyring
+keyring = ["datadog-api/keyring"]
+# All features enabled
+full = ["toon", "keyring"]
+
+[dependencies]
+datadog-api = { path = "../datadog-api", default-features = false }
+
+# MCP Server SDK
+rmcp = { git = "https://github.com/modelcontextprotocol/rust-sdk.git", rev = "8a577659f01917289064c0a3c753392b44305ef4", features = ["server", "transport-io"] }
+
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+dotenv = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+async-trait = { workspace = true }
+
+# CLI argument parsing
+clap = { version = "4.5", features = ["derive"] }
+
+# JSON Schema generation for tool input schemas
+schemars = { version = "0.8", features = ["derive"] }
+
+# TOON format for token-efficient LLM output (optional)
+toon = { version = "0.1", optional = true }
+
+[dev-dependencies]
+tempfile = "3.10"
+wiremock = "0.6"
+serial_test = "3.1"

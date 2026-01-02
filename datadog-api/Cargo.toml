@@ -1,0 +1,43 @@
+[package]
+name = "datadog-api"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Rust client library for the Datadog API with type-safe access to monitors, dashboards, metrics, logs, and more"
+readme = "README.md"
+keywords = ["datadog", "monitoring", "observability", "metrics", "api"]
+categories = ["api-bindings", "web-programming::http-client"]
+
+[features]
+default = ["keyring"]
+# Secure credential storage in system keyring
+keyring = ["dep:keyring"]
+
+[dependencies]
+tokio = { workspace = true }
+reqwest = { workspace = true }
+reqwest-middleware = { workspace = true }
+reqwest-retry = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+regex = { workspace = true }
+zeroize = { workspace = true }
+keyring = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio-test = "0.4"
+serial_test = "3.1"
+wiremock = "0.6"
+proptest = "1.4"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "serialization"
+harness = false

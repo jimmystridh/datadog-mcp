@@ -1,3 +1,4 @@
+use crate::rate_limit::{RateLimitConfig, RateLimiter};
 use crate::{config::DatadogConfig, error::Error, Result};
 use reqwest::{header, Client, Response};
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware, RequestBuilder};
@@ -34,10 +35,12 @@ fn sanitize_log_message(message: &str) -> String {
 /// HTTP client for interacting with the Datadog API.
 ///
 /// Handles authentication, request building, and response parsing for all Datadog API endpoints.
+/// Includes client-side rate limiting to prevent hitting Datadog's API limits.
 #[derive(Clone)]
 pub struct DatadogClient {
     client: ClientWithMiddleware,
     config: DatadogConfig,
+    rate_limiter: RateLimiter,
 }
 
 impl DatadogClient {
@@ -47,6 +50,15 @@ impl DatadogClient {
     ///
     /// Returns an error if the HTTP client cannot be built.
     pub fn new(config: DatadogConfig) -> Result<Self> {
+        Self::with_rate_limit(config, RateLimitConfig::default())
+    }
+
+    /// Creates a new Datadog API client with custom rate limiting configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the HTTP client cannot be built.
+    pub fn with_rate_limit(config: DatadogConfig, rate_limit_config: RateLimitConfig) -> Result<Self> {
         let retry_policy = ExponentialBackoff::builder()
             .retry_bounds(
                 Duration::from_millis(config.retry_config.initial_backoff_ms),
@@ -67,7 +79,13 @@ impl DatadogClient {
             .with(retry_middleware)
             .build();
 
-        Ok(Self { client, config })
+        let rate_limiter = RateLimiter::new(rate_limit_config);
+
+        Ok(Self {
+            client,
+            config,
+            rate_limiter,
+        })
     }
 
     /// Returns a reference to the configuration used by this client.
@@ -155,6 +173,8 @@ impl DatadogClient {
     }
 
     pub async fn get<T: DeserializeOwned>(&self, endpoint: &str) -> Result<T> {
+        self.rate_limiter.acquire().await;
+
         let url = format!("{}{}", self.config.base_url(), endpoint);
         debug!("GET {url}");
 
@@ -171,6 +191,8 @@ impl DatadogClient {
         endpoint: &str,
         query: &Q,
     ) -> Result<T> {
+        self.rate_limiter.acquire().await;
+
         let url = format!("{}{}", self.config.base_url(), endpoint);
 
         let request = self.client.get(&url).query(query);
@@ -187,6 +209,8 @@ impl DatadogClient {
         endpoint: &str,
         body: &B,
     ) -> Result<T> {
+        self.rate_limiter.acquire().await;
+
         let url = format!("{}{}", self.config.base_url(), endpoint);
         debug!("POST {url}");
 
@@ -207,6 +231,8 @@ impl DatadogClient {
         endpoint: &str,
         body: &B,
     ) -> Result<T> {
+        self.rate_limiter.acquire().await;
+
         let url = format!("{}{}", self.config.base_url(), endpoint);
         debug!("PUT {url}");
 
@@ -223,6 +249,8 @@ impl DatadogClient {
     }
 
     pub async fn delete(&self, endpoint: &str) -> Result<()> {
+        self.rate_limiter.acquire().await;
+
         let url = format!("{}{}", self.config.base_url(), endpoint);
         debug!("DELETE {url}");
 
@@ -252,6 +280,8 @@ impl DatadogClient {
     }
 
     pub async fn delete_with_response<T: DeserializeOwned>(&self, endpoint: &str) -> Result<T> {
+        self.rate_limiter.acquire().await;
+
         let url = format!("{}{}", self.config.base_url(), endpoint);
         debug!("DELETE {url}");
 
@@ -260,6 +290,12 @@ impl DatadogClient {
 
         let response = request.send().await.map_err(Error::MiddlewareError)?;
         self.handle_response(response).await
+    }
+
+    /// Returns a reference to the rate limiter (for monitoring)
+    #[must_use]
+    pub fn rate_limiter(&self) -> &RateLimiter {
+        &self.rate_limiter
     }
 }
 

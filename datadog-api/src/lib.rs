@@ -94,7 +94,9 @@ pub mod client;
 pub mod config;
 pub mod error;
 pub mod models;
+pub mod pagination;
 
 pub use client::DatadogClient;
 pub use config::DatadogConfig;
 pub use error::{Error, Result};
+pub use pagination::{CursorParams, PageParams, PaginatedResponse, PaginationMeta};

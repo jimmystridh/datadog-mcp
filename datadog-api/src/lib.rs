@@ -98,7 +98,7 @@ pub mod pagination;
 pub mod rate_limit;
 
 pub use client::{CacheInfo, CachedResponse, DatadogClient};
-pub use config::DatadogConfig;
+pub use config::{DatadogConfig, HttpConfig, RetryConfig};
 pub use error::{Error, Result};
 pub use pagination::{CursorParams, PageParams, PaginatedResponse, PaginationMeta};
 pub use rate_limit::{RateLimitConfig, RateLimiter};

@@ -29,6 +29,30 @@ impl Default for RetryConfig {
     }
 }
 
+/// HTTP client configuration for connection pooling and timeouts.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct HttpConfig {
+    /// Request timeout in seconds (default: 30)
+    pub timeout_secs: u64,
+    /// Maximum idle connections per host in the pool (default: 10)
+    pub pool_max_idle_per_host: usize,
+    /// Idle connection timeout in seconds (default: 90)
+    pub pool_idle_timeout_secs: u64,
+    /// Enable TCP keepalive with given interval in seconds (default: Some(60))
+    pub tcp_keepalive_secs: Option<u64>,
+}
+
+impl Default for HttpConfig {
+    fn default() -> Self {
+        Self {
+            timeout_secs: 30,
+            pool_max_idle_per_host: 10,
+            pool_idle_timeout_secs: 90,
+            tcp_keepalive_secs: Some(60),
+        }
+    }
+}
+
 /// Datadog API configuration containing credentials and regional settings.
 #[derive(Clone, Deserialize, Serialize)]
 pub struct DatadogConfig {
@@ -42,6 +66,9 @@ pub struct DatadogConfig {
     /// Retry configuration
     #[serde(default)]
     pub retry_config: RetryConfig,
+    /// HTTP client configuration (timeouts, connection pool)
+    #[serde(default)]
+    pub http_config: HttpConfig,
     /// List of unstable operations that require the DD-OPERATION-UNSTABLE header
     #[serde(default = "default_unstable_operations")]
     pub unstable_operations: Vec<String>,
@@ -57,6 +84,7 @@ impl fmt::Debug for DatadogConfig {
             .field("app_key", &"[REDACTED]")
             .field("site", &self.site)
             .field("retry_config", &self.retry_config)
+            .field("http_config", &self.http_config)
             .field("unstable_operations", &self.unstable_operations)
             .field(
                 "base_url_override",
@@ -89,6 +117,7 @@ impl DatadogConfig {
             app_key: SecretString::new(application_key),
             site: default_site(),
             retry_config: RetryConfig::default(),
+            http_config: HttpConfig::default(),
             unstable_operations: default_unstable_operations(),
             base_url_override: None,
         }
@@ -148,6 +177,7 @@ impl DatadogConfig {
             app_key: SecretString::new(application_key),
             site,
             retry_config: RetryConfig::default(),
+            http_config: HttpConfig::default(),
             unstable_operations: default_unstable_operations(),
             base_url_override: None,
         })
@@ -401,5 +431,35 @@ mod tests {
         assert_eq!(config.api_key, deserialized.api_key);
         assert_eq!(config.app_key, deserialized.app_key);
         assert_eq!(config.site, deserialized.site);
+    }
+
+    #[test]
+    fn test_http_config_default() {
+        let config = HttpConfig::default();
+        assert_eq!(config.timeout_secs, 30);
+        assert_eq!(config.pool_max_idle_per_host, 10);
+        assert_eq!(config.pool_idle_timeout_secs, 90);
+        assert_eq!(config.tcp_keepalive_secs, Some(60));
+    }
+
+    #[test]
+    fn test_http_config_serialization() {
+        let config = HttpConfig {
+            timeout_secs: 60,
+            pool_max_idle_per_host: 20,
+            pool_idle_timeout_secs: 120,
+            tcp_keepalive_secs: None,
+        };
+
+        let json = serde_json::to_string(&config).expect("Failed to serialize");
+        let deserialized: HttpConfig =
+            serde_json::from_str(&json).expect("Failed to deserialize");
+
+        assert_eq!(config.timeout_secs, deserialized.timeout_secs);
+        assert_eq!(
+            config.pool_max_idle_per_host,
+            deserialized.pool_max_idle_per_host
+        );
+        assert_eq!(config.tcp_keepalive_secs, deserialized.tcp_keepalive_secs);
     }
 }

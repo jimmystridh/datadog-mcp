@@ -68,12 +68,18 @@ impl DatadogClient {
 
         let retry_middleware = RetryTransientMiddleware::new_with_policy(retry_policy);
 
-        let base_client = Client::builder()
-            .timeout(Duration::from_secs(30))
-            .pool_max_idle_per_host(10)
-            .gzip(true)
-            .build()
-            .map_err(Error::HttpError)?;
+        let http_config = &config.http_config;
+        let mut builder = Client::builder()
+            .timeout(Duration::from_secs(http_config.timeout_secs))
+            .pool_max_idle_per_host(http_config.pool_max_idle_per_host)
+            .pool_idle_timeout(Duration::from_secs(http_config.pool_idle_timeout_secs))
+            .gzip(true);
+
+        if let Some(keepalive_secs) = http_config.tcp_keepalive_secs {
+            builder = builder.tcp_keepalive(Duration::from_secs(keepalive_secs));
+        }
+
+        let base_client = builder.build().map_err(Error::HttpError)?;
 
         let client = ClientBuilder::new(base_client)
             .with(retry_middleware)

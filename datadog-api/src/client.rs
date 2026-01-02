@@ -297,6 +297,116 @@ impl DatadogClient {
     pub fn rate_limiter(&self) -> &RateLimiter {
         &self.rate_limiter
     }
+
+    /// GET request with conditional caching support (ETag/Last-Modified).
+    ///
+    /// Returns `Ok(Some(response))` if data was modified, or `Ok(None)` if
+    /// the cached version is still valid (304 Not Modified).
+    ///
+    /// # Arguments
+    ///
+    /// * `endpoint` - API endpoint
+    /// * `cache_info` - Optional cache info from a previous response
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use datadog_api::{DatadogClient, DatadogConfig, CachedResponse};
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = DatadogClient::new(DatadogConfig::from_env()?)?;
+    ///
+    /// // First request - no cache
+    /// let response: CachedResponse<serde_json::Value> = client
+    ///     .get_cached("/api/v1/monitor", None)
+    ///     .await?
+    ///     .expect("First request should return data");
+    ///
+    /// // Subsequent request with cache info
+    /// match client.get_cached("/api/v1/monitor", Some(&response.cache_info)).await? {
+    ///     Some(new_response) => println!("Data was modified"),
+    ///     None => println!("Data unchanged, use cached version"),
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_cached<T: DeserializeOwned>(
+        &self,
+        endpoint: &str,
+        cache_info: Option<&CacheInfo>,
+    ) -> Result<Option<CachedResponse<T>>> {
+        self.rate_limiter.acquire().await;
+
+        let url = format!("{}{}", self.config.base_url(), endpoint);
+        debug!("GET (cached) {url}");
+
+        let mut request = self.client.get(&url);
+
+        // Add conditional headers if we have cache info
+        if let Some(info) = cache_info {
+            if let Some(etag) = &info.etag {
+                request = request.header(header::IF_NONE_MATCH, etag.as_str());
+            }
+            if let Some(last_modified) = &info.last_modified {
+                request = request.header(header::IF_MODIFIED_SINCE, last_modified.as_str());
+            }
+        }
+
+        let request = self.add_auth_headers(request, endpoint)?;
+        let response = request.send().await.map_err(Error::MiddlewareError)?;
+
+        // 304 Not Modified - cached data is still valid
+        if response.status() == reqwest::StatusCode::NOT_MODIFIED {
+            debug!("304 Not Modified - using cached data");
+            return Ok(None);
+        }
+
+        // Extract cache headers before consuming the response
+        let new_cache_info = CacheInfo {
+            etag: response
+                .headers()
+                .get(header::ETAG)
+                .and_then(|v| v.to_str().ok())
+                .map(String::from),
+            last_modified: response
+                .headers()
+                .get(header::LAST_MODIFIED)
+                .and_then(|v| v.to_str().ok())
+                .map(String::from),
+        };
+
+        let data: T = self.handle_response(response).await?;
+
+        Ok(Some(CachedResponse {
+            data,
+            cache_info: new_cache_info,
+        }))
+    }
+}
+
+/// Cache validation information from HTTP headers
+#[derive(Debug, Clone, Default)]
+pub struct CacheInfo {
+    /// ETag header value for conditional requests
+    pub etag: Option<String>,
+    /// Last-Modified header value for conditional requests
+    pub last_modified: Option<String>,
+}
+
+impl CacheInfo {
+    /// Check if any cache validation info is available
+    #[must_use]
+    pub fn has_validators(&self) -> bool {
+        self.etag.is_some() || self.last_modified.is_some()
+    }
+}
+
+/// Response with cache validation information
+#[derive(Debug, Clone)]
+pub struct CachedResponse<T> {
+    /// The response data
+    pub data: T,
+    /// Cache information for subsequent conditional requests
+    pub cache_info: CacheInfo,
 }
 
 #[cfg(test)]
@@ -347,5 +457,44 @@ mod tests {
         let input = "API_KEY=secret123";
         let output = sanitize_log_message(input);
         assert!(!output.contains("secret123"));
+    }
+
+    #[test]
+    fn test_cache_info_default() {
+        let info = CacheInfo::default();
+        assert!(info.etag.is_none());
+        assert!(info.last_modified.is_none());
+        assert!(!info.has_validators());
+    }
+
+    #[test]
+    fn test_cache_info_with_etag() {
+        let info = CacheInfo {
+            etag: Some("\"abc123\"".to_string()),
+            last_modified: None,
+        };
+        assert!(info.has_validators());
+    }
+
+    #[test]
+    fn test_cache_info_with_last_modified() {
+        let info = CacheInfo {
+            etag: None,
+            last_modified: Some("Wed, 21 Oct 2025 07:28:00 GMT".to_string()),
+        };
+        assert!(info.has_validators());
+    }
+
+    #[test]
+    fn test_cached_response() {
+        let response = CachedResponse {
+            data: vec![1, 2, 3],
+            cache_info: CacheInfo {
+                etag: Some("\"test-etag\"".to_string()),
+                last_modified: Some("Wed, 21 Oct 2025 07:28:00 GMT".to_string()),
+            },
+        };
+        assert_eq!(response.data, vec![1, 2, 3]);
+        assert!(response.cache_info.has_validators());
     }
 }

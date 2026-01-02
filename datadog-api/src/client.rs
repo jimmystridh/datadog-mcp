@@ -328,7 +328,7 @@ impl DatadogClient {
     ///     .expect("First request should return data");
     ///
     /// // Subsequent request with cache info
-    /// match client.get_cached("/api/v1/monitor", Some(&response.cache_info)).await? {
+    /// match client.get_cached::<serde_json::Value>("/api/v1/monitor", Some(&response.cache_info)).await? {
     ///     Some(new_response) => println!("Data was modified"),
     ///     None => println!("Data unchanged, use cached version"),
     /// }

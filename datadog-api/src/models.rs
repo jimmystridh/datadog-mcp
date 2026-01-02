@@ -5,6 +5,189 @@ use std::collections::HashMap;
 pub type Tags = Vec<String>;
 pub type JsonValue = serde_json::Value;
 
+// ============================================================================
+// DASHBOARD WIDGETS
+// ============================================================================
+
+/// Common widget definition structure
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Widget {
+    /// Widget definition containing type-specific configuration
+    pub definition: WidgetDefinition,
+    /// Widget layout (for free-form dashboards)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layout: Option<WidgetLayout>,
+    /// Widget ID (set by Datadog)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<i64>,
+}
+
+/// Widget layout for free-form dashboards
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WidgetLayout {
+    pub x: i64,
+    pub y: i64,
+    pub width: i64,
+    pub height: i64,
+}
+
+/// Widget definition - uses tagged enum for type safety
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum WidgetDefinition {
+    /// Timeseries graph widget
+    Timeseries(TimeseriesDefinition),
+    /// Single value query widget
+    QueryValue(QueryValueDefinition),
+    /// Top list widget
+    Toplist(ToplistDefinition),
+    /// Table widget
+    QueryTable(QueryTableDefinition),
+    /// Heatmap widget
+    Heatmap(HeatmapDefinition),
+    /// Note/text widget
+    Note(NoteDefinition),
+    /// Group widget (contains other widgets)
+    Group(GroupDefinition),
+    /// Fallback for unsupported widget types
+    #[serde(other, rename = "unknown")]
+    Unknown,
+}
+
+/// Timeseries widget definition
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TimeseriesDefinition {
+    pub requests: Vec<TimeseriesRequest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub show_legend: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub legend_size: Option<String>,
+}
+
+/// Request for timeseries data
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TimeseriesRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub q: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queries: Option<Vec<JsonValue>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub formulas: Option<Vec<JsonValue>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub style: Option<JsonValue>,
+}
+
+/// Query value widget definition
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueryValueDefinition {
+    pub requests: Vec<QueryValueRequest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub precision: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub autoscale: Option<bool>,
+}
+
+/// Request for query value
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueryValueRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub q: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queries: Option<Vec<JsonValue>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub formulas: Option<Vec<JsonValue>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aggregator: Option<String>,
+}
+
+/// Toplist widget definition
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToplistDefinition {
+    pub requests: Vec<ToplistRequest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+}
+
+/// Request for toplist
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToplistRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub q: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queries: Option<Vec<JsonValue>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub formulas: Option<Vec<JsonValue>>,
+}
+
+/// Query table widget definition
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueryTableDefinition {
+    pub requests: Vec<QueryTableRequest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+}
+
+/// Request for query table
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueryTableRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub q: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queries: Option<Vec<JsonValue>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub formulas: Option<Vec<JsonValue>>,
+}
+
+/// Heatmap widget definition
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HeatmapDefinition {
+    pub requests: Vec<HeatmapRequest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+}
+
+/// Request for heatmap
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HeatmapRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub q: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub style: Option<JsonValue>,
+}
+
+/// Note/text widget definition
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NoteDefinition {
+    pub content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub background_color: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font_size: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text_align: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub show_tick: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tick_pos: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tick_edge: Option<String>,
+}
+
+/// Group widget definition (contains nested widgets)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GroupDefinition {
+    pub layout_type: String,
+    pub widgets: Vec<Widget>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+}
+
 // Metrics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MetricsQueryResponse {
@@ -129,11 +312,25 @@ pub struct Dashboard {
     pub id: Option<String>,
     pub title: Option<String>,
     pub description: Option<String>,
-    pub widgets: Option<Vec<JsonValue>>,
+    pub widgets: Option<Vec<Widget>>,
     pub layout_type: Option<String>,
     pub is_read_only: Option<bool>,
     pub notify_list: Option<Vec<String>>,
-    pub template_variables: Option<Vec<JsonValue>>,
+    pub template_variables: Option<Vec<TemplateVariable>>,
+}
+
+/// Dashboard template variable
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TemplateVariable {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prefix: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub defaults: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub available_values: Option<Vec<String>>,
 }
 
 // Logs

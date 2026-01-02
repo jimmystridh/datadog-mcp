@@ -101,6 +101,11 @@ pub mod timestamp;
 pub use client::{CacheInfo, CachedResponse, DatadogClient};
 pub use config::{DatadogConfig, HttpConfig, RetryConfig};
 pub use error::{Error, Result};
+pub use models::{
+    GroupDefinition, HeatmapDefinition, NoteDefinition, QueryTableDefinition,
+    QueryValueDefinition, TemplateVariable, TimeseriesDefinition, ToplistDefinition, Widget,
+    WidgetDefinition, WidgetLayout,
+};
 pub use pagination::{CursorParams, PageParams, PaginatedResponse, PaginationMeta};
 pub use rate_limit::{RateLimitConfig, RateLimiter};
 pub use timestamp::{TimestampMillis, TimestampNanos, TimestampSecs};

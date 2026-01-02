@@ -5,7 +5,7 @@ use crate::response::{simple_success_with_fields, tool_error};
 use crate::sanitize::{sanitize_name, sanitize_optional, MAX_MESSAGE_LENGTH, MAX_NAME_LENGTH};
 use crate::state::ToolContext;
 use crate::input_validation::{validate_dashboard_layout, validate_dashboard_title};
-use datadog_api::models::*;
+use datadog_api::models::{Dashboard, Widget};
 use serde_json::{json, Value};
 use tracing::info;
 
@@ -88,13 +88,19 @@ pub async fn create_dashboard(
         return Ok(tool_error("create_dashboard", e));
     }
 
+    // Convert JSON widgets to typed widgets
+    let typed_widgets: Vec<Widget> = widgets
+        .into_iter()
+        .filter_map(|w| serde_json::from_value(w).ok())
+        .collect();
+
     info!("Creating dashboard: {}", title);
 
     let dashboard = Dashboard {
         id: None,
         title: Some(title.clone()),
         description,
-        widgets: Some(widgets),
+        widgets: Some(typed_widgets),
         layout_type: Some(layout_type),
         is_read_only: None,
         notify_list: None,
@@ -135,11 +141,18 @@ pub async fn update_dashboard(
     // Get existing dashboard first
     let existing = api.get_dashboard(&dashboard_id.0).await?;
 
+    // Convert JSON widgets to typed widgets if provided
+    let typed_widgets: Option<Vec<Widget>> = widgets.map(|w| {
+        w.into_iter()
+            .filter_map(|widget| serde_json::from_value(widget).ok())
+            .collect()
+    });
+
     let updated_dashboard = Dashboard {
         id: existing.id,
         title: title.or(existing.title),
         description: existing.description,
-        widgets: widgets.or(existing.widgets),
+        widgets: typed_widgets.or(existing.widgets),
         layout_type: existing.layout_type,
         is_read_only: existing.is_read_only,
         notify_list: existing.notify_list,

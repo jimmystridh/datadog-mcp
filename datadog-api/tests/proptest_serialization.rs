@@ -202,3 +202,76 @@ fn rate_limit_config_disabled_constructor() {
     let config = RateLimitConfig::disabled();
     assert!(!config.enabled);
 }
+
+#[test]
+fn widget_note_roundtrip() {
+    use datadog_api::models::{Widget, WidgetDefinition, NoteDefinition};
+
+    let widget = Widget {
+        definition: WidgetDefinition::Note(NoteDefinition {
+            content: "Hello world".into(),
+            background_color: Some("white".into()),
+            font_size: Some("16".into()),
+            text_align: Some("center".into()),
+            show_tick: None,
+            tick_pos: None,
+            tick_edge: None,
+        }),
+        layout: None,
+        id: Some(42),
+    };
+
+    let json = serde_json::to_string(&widget).unwrap();
+    let parsed: Widget = serde_json::from_str(&json).unwrap();
+
+    assert_eq!(parsed.id, Some(42));
+    if let WidgetDefinition::Note(def) = parsed.definition {
+        assert_eq!(def.content, "Hello world");
+    } else {
+        panic!("Expected Note widget");
+    }
+}
+
+#[test]
+fn widget_timeseries_roundtrip() {
+    use datadog_api::models::{Widget, WidgetDefinition, TimeseriesDefinition, TimeseriesRequest};
+
+    let widget = Widget {
+        definition: WidgetDefinition::Timeseries(TimeseriesDefinition {
+            requests: vec![TimeseriesRequest {
+                q: Some("avg:system.cpu.user{*}".into()),
+                queries: None,
+                formulas: None,
+                display_type: Some("line".into()),
+                style: None,
+            }],
+            title: Some("CPU Usage".into()),
+            show_legend: Some(true),
+            legend_size: None,
+        }),
+        layout: None,
+        id: None,
+    };
+
+    let json = serde_json::to_string(&widget).unwrap();
+    let parsed: Widget = serde_json::from_str(&json).unwrap();
+
+    if let WidgetDefinition::Timeseries(def) = parsed.definition {
+        assert_eq!(def.title, Some("CPU Usage".into()));
+        assert_eq!(def.requests.len(), 1);
+        assert_eq!(def.requests[0].q, Some("avg:system.cpu.user{*}".into()));
+    } else {
+        panic!("Expected Timeseries widget");
+    }
+}
+
+#[test]
+fn widget_unknown_type_fallback() {
+    use datadog_api::models::{Widget, WidgetDefinition};
+
+    // Unknown widget types should deserialize to Unknown variant
+    let json = r#"{"definition": {"type": "future_widget_type", "data": "test"}, "id": 1}"#;
+    let widget: Widget = serde_json::from_str(json).unwrap();
+
+    matches!(widget.definition, WidgetDefinition::Unknown);
+}

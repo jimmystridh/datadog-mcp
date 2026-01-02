@@ -241,7 +241,10 @@ async fn get_dashboard_success() {
             "id": "abc-123",
             "title": "Main Dashboard",
             "layout_type": "ordered",
-            "widgets": [{"id": 1}, {"id": 2}]
+            "widgets": [
+                {"id": 1, "definition": {"type": "note", "content": "Hello"}},
+                {"id": 2, "definition": {"type": "note", "content": "World"}}
+            ]
         })))
         .mount(&server)
         .await;

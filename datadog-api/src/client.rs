@@ -163,10 +163,10 @@ impl DatadogClient {
             response.json::<T>().await.map_err(Error::HttpError)
         } else {
             let status_code = status.as_u16();
-            let error_body = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Failed to read error body".to_string());
+            let error_body = response.text().await.unwrap_or_else(|e| {
+                debug!("Failed to read error response body: {e}");
+                format!("(failed to read error body: {e})")
+            });
 
             let sanitized_body = sanitize_log_message(&error_body);
             error!("API error: {status_code} - {sanitized_body}");
@@ -270,10 +270,10 @@ impl DatadogClient {
             Ok(())
         } else {
             let status_code = status.as_u16();
-            let error_body = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Failed to read error body".to_string());
+            let error_body = response.text().await.unwrap_or_else(|e| {
+                debug!("Failed to read error response body: {e}");
+                format!("(failed to read error body: {e})")
+            });
 
             let sanitized_body = sanitize_log_message(&error_body);
             error!("API error: {} - {}", status_code, sanitized_body);

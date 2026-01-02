@@ -97,8 +97,9 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: |
+          # Disable keyring for cross-compiled builds (requires system DBus)
           if [[ "${{ matrix.use_cross }}" == "true" ]]; then
-            cross build --release --target ${{ matrix.target }} -p datadog-mcp
+            cross build --release --target ${{ matrix.target }} -p datadog-mcp --no-default-features --features toon
           else
             cargo build --release --target ${{ matrix.target }} -p datadog-mcp
           fi
@@ -107,11 +108,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          if ('${{ matrix.use_cross }}' -eq 'true') {
-            cross build --release --target '${{ matrix.target }}' -p datadog-mcp
-          } else {
-            cargo build --release --target '${{ matrix.target }}' -p datadog-mcp
-          }
+          cargo build --release --target '${{ matrix.target }}' -p datadog-mcp
 
       - name: Package binary
         shell: bash

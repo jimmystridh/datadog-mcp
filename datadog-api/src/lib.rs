@@ -1,18 +1,43 @@
 //! # Datadog API Client Library
 //!
-//! A Rust client library for interacting with the Datadog API.
+//! A Rust client for the Datadog API with type-safe access to monitors,
+//! dashboards, metrics, logs, synthetics, and more.
 //!
-//! This library provides a type-safe, async interface to Datadog's monitoring and observability
-//! platform. It handles authentication, request building, and response parsing for all major
-//! Datadog API endpoints.
+//! ## Architecture
 //!
-//! ## Features
-//!
-//! - **Async/await support** - Built on tokio for non-blocking I/O
-//! - **Type-safe** - Comprehensive type definitions for all API resources
-//! - **Modular** - Organized by API category (metrics, monitors, dashboards, etc.)
-//! - **Error handling** - Detailed error types for API failures
-//! - **Configuration** - Support for multiple Datadog regions
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────┐
+//! │                      datadog-api                            │
+//! ├─────────────────────────────────────────────────────────────┤
+//! │  config.rs          │  Configuration & credentials         │
+//! │  ├─ DatadogConfig   │  API keys, site, retry settings      │
+//! │  └─ SecretString    │  Zeroize-on-drop credential wrapper  │
+//! ├─────────────────────────────────────────────────────────────┤
+//! │  client.rs          │  HTTP client with middleware         │
+//! │  └─ DatadogClient   │  Retry logic, auth headers, gzip     │
+//! ├─────────────────────────────────────────────────────────────┤
+//! │  apis/              │  Domain-specific API modules         │
+//! │  ├─ monitors        │  Monitor CRUD operations             │
+//! │  ├─ dashboards      │  Dashboard management                │
+//! │  ├─ metrics         │  Metrics queries                     │
+//! │  ├─ logs            │  Log search                          │
+//! │  ├─ synthetics      │  Synthetic tests                     │
+//! │  ├─ events          │  Event stream                        │
+//! │  ├─ infrastructure  │  Hosts and tags                      │
+//! │  ├─ downtimes       │  Scheduled downtimes                 │
+//! │  ├─ incidents       │  Incident management                 │
+//! │  ├─ slos            │  Service Level Objectives            │
+//! │  ├─ security        │  Security rules                      │
+//! │  ├─ notebooks       │  Notebooks                           │
+//! │  ├─ teams/users     │  Team and user management            │
+//! │  └─ traces          │  APM traces                          │
+//! ├─────────────────────────────────────────────────────────────┤
+//! │  models/            │  Request/response types (Serde)      │
+//! ├─────────────────────────────────────────────────────────────┤
+//! │  error.rs           │  Error types with helper methods     │
+//! │  └─ Error           │  is_retryable, is_not_found, etc.    │
+//! └─────────────────────────────────────────────────────────────┘
+//! ```
 //!
 //! ## Quick Start
 //!
@@ -22,41 +47,36 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     // Load configuration from environment variables
 //!     let config = DatadogConfig::from_env()?;
-//!
-//!     // Create a client
 //!     let client = DatadogClient::new(config)?;
-//!
-//!     // Use an API
 //!     let metrics_api = MetricsApi::new(client);
 //!     let metrics = metrics_api.list_metrics("system.cpu").await?;
-//!
 //!     println!("Found {} metrics", metrics.metrics.unwrap_or_default().len());
 //!     Ok(())
 //! }
 //! ```
 //!
-//! ## Configuration
+//! ## Configuration Sources
 //!
-//! The library requires Datadog API credentials which can be provided via:
+//! Credentials load from (in order):
+//! 1. **File**: `~/.datadog-mcp/credentials.json`
+//! 2. **Keyring**: System credential storage (requires `keyring` feature)
+//! 3. **Environment**: `DD_API_KEY`, `DD_APP_KEY`, `DD_SITE`
 //!
-//! 1. Environment variables (recommended):
-//!    - `DD_API_KEY` - Your Datadog API key
-//!    - `DD_APP_KEY` - Your Datadog application key
-//!    - `DD_SITE` - Optional Datadog site (defaults to datadoghq.com)
+//! Use `DatadogConfig::from_env_or_file()` to try all sources.
 //!
-//! 2. Programmatically:
-//!    ```no_run
-//!    use datadog_api::DatadogConfig;
+//! ## Error Handling
 //!
-//!    let config = DatadogConfig::new(
-//!        "api_key".to_string(),
-//!        "app_key".to_string()
-//!    ).with_site("datadoghq.eu".to_string());
-//!    ```
+//! ```no_run
+//! # use datadog_api::Error;
+//! fn handle(e: &Error) {
+//!     if e.is_not_found() { /* 404 */ }
+//!     else if e.is_rate_limited() { /* 429 - back off */ }
+//!     else if e.is_retryable() { /* transient - retry */ }
+//! }
+//! ```
 //!
-//! ## Supported Datadog Sites
+//! ## Supported Sites
 //!
 //! - US1: `datadoghq.com` (default)
 //! - US3: `us3.datadoghq.com`
@@ -64,6 +84,10 @@
 //! - EU: `datadoghq.eu`
 //! - AP1: `ap1.datadoghq.com`
 //! - US1-FED: `ddog-gov.com`
+//!
+//! ## Cargo Features
+//!
+//! - `keyring` (default): Secure credential storage in system keyring
 
 pub mod apis;
 pub mod client;

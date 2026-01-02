@@ -1,3 +1,9 @@
+//! Server state and tool context management
+//!
+//! Provides shared state for the MCP server including the Datadog client,
+//! configuration, and output format. Also provides `ToolContext` which gives
+//! tool functions convenient access to API clients.
+
 use anyhow::Result;
 use datadog_api::{
     apis::{

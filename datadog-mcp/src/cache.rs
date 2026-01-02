@@ -1,3 +1,14 @@
+//! File-based caching for MCP tool responses
+//!
+//! Stores API responses to disk for inspection and reduces context usage.
+//! Supports both JSON and TOON output formats with automatic cleanup.
+//!
+//! Cache location priority:
+//! 1. `DATADOG_MCP_CACHE_DIR` environment variable
+//! 2. `$XDG_CACHE_HOME/datadog-mcp/`
+//! 3. `~/.cache/datadog-mcp/`
+//! 4. `./datadog_cache/` (fallback)
+
 use anyhow::Result;
 use chrono::Utc;
 use serde::Serialize;

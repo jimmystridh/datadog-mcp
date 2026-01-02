@@ -1,3 +1,9 @@
+//! Datadog MCP Server
+//!
+//! A Model Context Protocol server that exposes Datadog tools to AI assistants.
+//! Runs over stdio and provides access to monitors, dashboards, metrics, logs,
+//! synthetics, and more through the MCP protocol.
+
 pub mod cache;
 mod errors;
 mod ids;

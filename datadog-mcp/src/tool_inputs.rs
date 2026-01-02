@@ -1,3 +1,9 @@
+//! Typed input schemas for MCP tools
+//!
+//! Defines strongly-typed input structures for each tool with JSON Schema
+//! generation support via `schemars`. These types are used by the MCP
+//! protocol to validate tool arguments from clients.
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 

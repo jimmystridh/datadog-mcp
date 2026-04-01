@@ -27,7 +27,7 @@ full = ["toon", "keyring"]
 datadog-api = { path = "../datadog-api", default-features = false }
 
 # MCP Server SDK
-rmcp = { git = "https://github.com/modelcontextprotocol/rust-sdk.git", rev = "8a577659f01917289064c0a3c753392b44305ef4", features = ["server", "transport-io"] }
+rmcp = { version = "1.3", features = ["server", "transport-io"] }
 
 tokio = { workspace = true }
 tokio-util = { workspace = true }
@@ -43,15 +43,15 @@ tracing-subscriber = { workspace = true }
 async-trait = { workspace = true }
 
 # CLI argument parsing
-clap = { version = "4.5", features = ["derive"] }
+clap = { version = "4.6", features = ["derive"] }
 
 # JSON Schema generation for tool input schemas
-schemars = { version = "0.8", features = ["derive"] }
+schemars = { version = "1", features = ["derive"] }
 
 # TOON format for token-efficient LLM output (optional)
 toon = { version = "0.1", optional = true }
 
 [dev-dependencies]
-tempfile = "3.10"
+tempfile = "3.27"
 wiremock = "0.6"
-serial_test = "3.1"
+serial_test = "3.4"

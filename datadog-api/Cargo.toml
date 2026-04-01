@@ -33,9 +33,9 @@ keyring = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio-test = "0.4"
-serial_test = "3.1"
+serial_test = "3.4"
 wiremock = "0.6"
-proptest = "1.4"
+proptest = "1.11"
 criterion = { version = "0.5", features = ["html_reports"] }
 
 [[bench]]

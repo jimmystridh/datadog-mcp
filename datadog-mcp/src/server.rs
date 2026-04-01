@@ -2,7 +2,7 @@
 //!
 //! This module defines the MCP server that exposes Datadog tools.
 //! Tools are organized by domain but must remain in a single impl block
-//! due to rmcp's `#[tool_box]` macro requirements.
+//! due to rmcp's `#[tool_router]` macro requirements.
 
 use crate::errors::to_mcp_error;
 use crate::output::{Formattable, OutputFormat};
@@ -10,12 +10,13 @@ use crate::state::ServerState;
 use crate::tool_inputs::*;
 use crate::tools;
 use rmcp::{
+    handler::server::{tool::ToolRouter, wrapper::Parameters},
     model::{
-        CallToolResult, Content, ErrorData, Implementation, InitializeRequestParam,
-        InitializeResult, ProtocolVersion, ServerCapabilities, ServerInfo,
+        CallToolResult, Content, ErrorData, InitializeRequestParams, InitializeResult,
+        ProtocolVersion, ServerCapabilities, ServerInfo,
     },
     service::RequestContext,
-    tool, Error as McpError, RoleServer, ServerHandler,
+    tool, tool_handler, tool_router, RoleServer, ServerHandler,
 };
 use serde::Serialize;
 use std::sync::Arc;
@@ -39,13 +40,15 @@ macro_rules! tool_call {
 #[derive(Clone)]
 pub struct DatadogMcpServer {
     pub state: Arc<ServerState>,
+    tool_router: ToolRouter<Self>,
 }
 
-#[tool(tool_box)]
+#[tool_router]
 impl DatadogMcpServer {
     pub fn new(state: ServerState) -> Self {
         Self {
             state: Arc::new(state),
+            tool_router: Self::tool_router(),
         }
     }
 
@@ -65,7 +68,7 @@ impl DatadogMcpServer {
     #[tool(description = "Query Datadog metrics time series data")]
     pub async fn get_metrics(
         &self,
-        #[tool(aggr)] input: GetMetricsInput,
+        Parameters(input): Parameters<GetMetricsInput>,
     ) -> Result<CallToolResult, ErrorData> {
         tool_call!(
             self,
@@ -81,7 +84,7 @@ impl DatadogMcpServer {
     #[tool(description = "Search for metrics by name pattern")]
     pub async fn search_metrics(
         &self,
-        #[tool(aggr)] input: SearchMetricsInput,
+        Parameters(input): Parameters<SearchMetricsInput>,
     ) -> Result<CallToolResult, ErrorData> {
         tool_call!(
             self,
@@ -92,7 +95,7 @@ impl DatadogMcpServer {
     #[tool(description = "Get metadata for a specific metric")]
     pub async fn get_metric_metadata(
         &self,
-        #[tool(aggr)] input: GetMetricMetadataInput,
+        Parameters(input): Parameters<GetMetricMetadataInput>,
     ) -> Result<CallToolResult, ErrorData> {
         tool_call!(
             self,
@@ -112,7 +115,7 @@ impl DatadogMcpServer {
     #[tool(description = "Search Datadog monitors")]
     pub async fn search_monitors(
         &self,
-        #[tool(aggr)] input: SearchMonitorsInput,
+        Parameters(input): Parameters<SearchMonitorsInput>,
     ) -> Result<CallToolResult, ErrorData> {
         tool_call!(
             self,
@@ -129,7 +132,7 @@ impl DatadogMcpServer {
     #[tool(description = "Get specific monitor by ID")]
     pub async fn get_monitor(
         &self,
-        #[tool(aggr)] input: GetMonitorInput,
+        Parameters(input): Parameters<GetMonitorInput>,
     ) -> Result<CallToolResult, ErrorData> {
         tool_call!(
             self,
@@ -140,7 +143,7 @@ impl DatadogMcpServer {
     #[tool(description = "Create a new Datadog monitor")]
     pub async fn create_monitor(
         &self,
-        #[tool(aggr)] input: CreateMonitorInput,
+        Parameters(input): Parameters<CreateMonitorInput>,
     ) -> Result<CallToolResult, ErrorData> {
         tool_call!(
             self,
@@ -158,7 +161,7 @@ impl DatadogMcpServer {
     #[tool(description = "Update an existing Datadog monitor")]
     pub async fn update_monitor(
         &self,
-        #[tool(aggr)] input: UpdateMonitorInput,
+        Parameters(input): Parameters<UpdateMonitorInput>,
     ) -> Result<CallToolResult, ErrorData> {
         tool_call!(
             self,
@@ -176,7 +179,7 @@ impl DatadogMcpServer {
     #[tool(description = "Delete a monitor")]
     pub async fn delete_monitor(
         &self,
-        #[tool(aggr)] input: DeleteMonitorInput,
+        Parameters(input): Parameters<DeleteMonitorInput>,
     ) -> Result<CallToolResult, ErrorData> {
         tool_call!(
             self,
@@ -196,7 +199,7 @@ impl DatadogMcpServer {
     #[tool(description = "Get specific dashboard by ID")]
     pub async fn get_dashboard(
         &self,
-        #[tool(aggr)] input: GetDashboardInput,
+        Parameters(input): Parameters<GetDashboardInput>,
     ) -> Result<CallToolResult, ErrorData> {
         tool_call!(
             self,
@@ -207,7 +210,7 @@ impl DatadogMcpServer {
     #[tool(description = "Create a new dashboard")]
     pub async fn create_dashboard(
         &self,
-        #[tool(aggr)] input: CreateDashboardInput,
+        Parameters(input): Parameters<CreateDashboardInput>,
     ) -> Result<CallToolResult, ErrorData> {
         tool_call!(
             self,
@@ -224,7 +227,7 @@ impl DatadogMcpServer {
     #[tool(description = "Update an existing dashboard")]
     pub async fn update_dashboard(
         &self,
-        #[tool(aggr)] input: UpdateDashboardInput,
+        Parameters(input): Parameters<UpdateDashboardInput>,
     ) -> Result<CallToolResult, ErrorData> {
         tool_call!(
             self,
@@ -240,7 +243,7 @@ impl DatadogMcpServer {
     #[tool(description = "Delete a dashboard")]
     pub async fn delete_dashboard(
         &self,
-        #[tool(aggr)] input: DeleteDashboardInput,
+        Parameters(input): Parameters<DeleteDashboardInput>,
     ) -> Result<CallToolResult, ErrorData> {
         tool_call!(
             self,
@@ -255,7 +258,7 @@ impl DatadogMcpServer {
     #[tool(description = "Search Datadog logs")]
     pub async fn search_logs(
         &self,
-        #[tool(aggr)] input: SearchLogsInput,
+        Parameters(input): Parameters<SearchLogsInput>,
     ) -> Result<CallToolResult, ErrorData> {
         tool_call!(
             self,
@@ -272,7 +275,7 @@ impl DatadogMcpServer {
     #[tool(description = "Get Datadog events")]
     pub async fn get_events(
         &self,
-        #[tool(aggr)] input: GetEventsInput,
+        Parameters(input): Parameters<GetEventsInput>,
     ) -> Result<CallToolResult, ErrorData> {
         tool_call!(
             self,
@@ -289,7 +292,7 @@ impl DatadogMcpServer {
     #[tool(description = "Create a Datadog event")]
     pub async fn create_event(
         &self,
-        #[tool(aggr)] input: CreateEventInput,
+        Parameters(input): Parameters<CreateEventInput>,
     ) -> Result<CallToolResult, ErrorData> {
         tool_call!(
             self,
@@ -313,7 +316,7 @@ impl DatadogMcpServer {
     #[tool(description = "Get Datadog event by ID")]
     pub async fn get_event(
         &self,
-        #[tool(aggr)] input: GetEventInput,
+        Parameters(input): Parameters<GetEventInput>,
     ) -> Result<CallToolResult, ErrorData> {
         tool_call!(
             self,
@@ -333,7 +336,7 @@ impl DatadogMcpServer {
     #[tool(description = "Get host tags")]
     pub async fn get_tags(
         &self,
-        #[tool(aggr)] input: GetTagsInput,
+        Parameters(input): Parameters<GetTagsInput>,
     ) -> Result<CallToolResult, ErrorData> {
         tool_call!(
             self,
@@ -344,7 +347,7 @@ impl DatadogMcpServer {
     #[tool(description = "Get Kubernetes deployments with their current state")]
     pub async fn get_kubernetes_deployments(
         &self,
-        #[tool(aggr)] input: GetKubernetesDeploymentsInput,
+        Parameters(input): Parameters<GetKubernetesDeploymentsInput>,
     ) -> Result<CallToolResult, ErrorData> {
         tool_call!(
             self,
@@ -364,7 +367,7 @@ impl DatadogMcpServer {
     #[tool(description = "Create a scheduled downtime")]
     pub async fn create_downtime(
         &self,
-        #[tool(aggr)] input: CreateDowntimeInput,
+        Parameters(input): Parameters<CreateDowntimeInput>,
     ) -> Result<CallToolResult, ErrorData> {
         tool_call!(
             self,
@@ -381,7 +384,7 @@ impl DatadogMcpServer {
     #[tool(description = "Cancel a scheduled downtime")]
     pub async fn cancel_downtime(
         &self,
-        #[tool(aggr)] input: CancelDowntimeInput,
+        Parameters(input): Parameters<CancelDowntimeInput>,
     ) -> Result<CallToolResult, ErrorData> {
         tool_call!(
             self,
@@ -409,7 +412,7 @@ impl DatadogMcpServer {
     #[tool(description = "Create a Synthetic API test (HTTP check)")]
     pub async fn create_synthetics_test(
         &self,
-        #[tool(aggr)] input: CreateSyntheticsTestInput,
+        Parameters(input): Parameters<CreateSyntheticsTestInput>,
     ) -> Result<CallToolResult, ErrorData> {
         tool_call!(
             self,
@@ -429,7 +432,7 @@ impl DatadogMcpServer {
     #[tool(description = "Update an existing Synthetics test")]
     pub async fn update_synthetics_test(
         &self,
-        #[tool(aggr)] input: UpdateSyntheticsTestInput,
+        Parameters(input): Parameters<UpdateSyntheticsTestInput>,
     ) -> Result<CallToolResult, ErrorData> {
         tool_call!(
             self,
@@ -449,7 +452,7 @@ impl DatadogMcpServer {
     #[tool(description = "Trigger Synthetics tests on-demand")]
     pub async fn trigger_synthetics_tests(
         &self,
-        #[tool(aggr)] input: TriggerSyntheticsTestsInput,
+        Parameters(input): Parameters<TriggerSyntheticsTestsInput>,
     ) -> Result<CallToolResult, ErrorData> {
         tool_call!(
             self,
@@ -460,7 +463,7 @@ impl DatadogMcpServer {
     #[tool(description = "Delete Synthetics tests")]
     pub async fn delete_synthetics_tests(
         &self,
-        #[tool(aggr)] input: DeleteSyntheticsTestsInput,
+        Parameters(input): Parameters<DeleteSyntheticsTestsInput>,
     ) -> Result<CallToolResult, ErrorData> {
         tool_call!(
             self,
@@ -484,7 +487,7 @@ impl DatadogMcpServer {
     #[tool(description = "Get incidents with pagination support")]
     pub async fn get_incidents(
         &self,
-        #[tool(aggr)] input: GetIncidentsInput,
+        Parameters(input): Parameters<GetIncidentsInput>,
     ) -> Result<CallToolResult, ErrorData> {
         tool_call!(
             self,
@@ -527,7 +530,7 @@ impl DatadogMcpServer {
     #[tool(description = "Analyze stored Datadog data (summary, stats, or trends)")]
     pub async fn analyze_data(
         &self,
-        #[tool(aggr)] input: AnalyzeDataInput,
+        Parameters(input): Parameters<AnalyzeDataInput>,
     ) -> Result<CallToolResult, ErrorData> {
         tool_call!(
             self,
@@ -538,7 +541,7 @@ impl DatadogMcpServer {
     #[tool(description = "Clean up old cache files")]
     pub async fn cleanup_cache(
         &self,
-        #[tool(aggr)] input: CleanupCacheInput,
+        Parameters(input): Parameters<CleanupCacheInput>,
     ) -> Result<CallToolResult, ErrorData> {
         tool_call!(self, tools::cleanup_cache_tool(input.older_than_hours))
     }
@@ -548,28 +551,24 @@ impl DatadogMcpServer {
 // SERVER HANDLER
 // ============================================================================
 
-#[tool(tool_box)]
+#[tool_handler]
 impl ServerHandler for DatadogMcpServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo {
-            protocol_version: ProtocolVersion::V_2024_11_05,
-            capabilities: ServerCapabilities::builder().enable_tools().build(),
-            server_info: Implementation::from_build_env(),
-            instructions: Some(
+        InitializeResult::new(ServerCapabilities::builder().enable_tools().build())
+            .with_protocol_version(ProtocolVersion::V_2024_11_05)
+            .with_instructions(
                 "This server provides comprehensive access to Datadog's monitoring and \
                  observability platform. Use the available tools to query metrics, manage \
                  monitors and dashboards, search logs, retrieve infrastructure information, \
-                 manage incidents, and more."
-                    .to_string(),
-            ),
-        }
+                 manage incidents, and more.",
+            )
     }
 
     async fn initialize(
         &self,
-        _request: InitializeRequestParam,
+        _request: InitializeRequestParams,
         _context: RequestContext<RoleServer>,
-    ) -> Result<InitializeResult, McpError> {
+    ) -> Result<InitializeResult, ErrorData> {
         Ok(self.get_info())
     }
 }

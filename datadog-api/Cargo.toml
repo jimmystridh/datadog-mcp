@@ -14,7 +14,7 @@ categories = ["api-bindings", "web-programming::http-client"]
 [features]
 default = ["keyring"]
 # Secure credential storage in system keyring
-keyring = ["dep:keyring"]
+keyring = ["dep:keyring", "dep:keyring-core"]
 
 [dependencies]
 tokio = { workspace = true }
@@ -30,13 +30,14 @@ tracing = { workspace = true }
 regex = { workspace = true }
 zeroize = { workspace = true }
 keyring = { workspace = true, optional = true }
+keyring-core = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio-test = "0.4"
 serial_test = "3.4"
 wiremock = "0.6"
 proptest = "1.11"
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 
 [[bench]]
 name = "serialization"

@@ -205,7 +205,7 @@ fn rate_limit_config_disabled_constructor() {
 
 #[test]
 fn widget_note_roundtrip() {
-    use datadog_api::models::{Widget, WidgetDefinition, NoteDefinition};
+    use datadog_api::models::{NoteDefinition, Widget, WidgetDefinition};
 
     let widget = Widget {
         definition: WidgetDefinition::Note(NoteDefinition {
@@ -234,7 +234,7 @@ fn widget_note_roundtrip() {
 
 #[test]
 fn widget_timeseries_roundtrip() {
-    use datadog_api::models::{Widget, WidgetDefinition, TimeseriesDefinition, TimeseriesRequest};
+    use datadog_api::models::{TimeseriesDefinition, TimeseriesRequest, Widget, WidgetDefinition};
 
     let widget = Widget {
         definition: WidgetDefinition::Timeseries(TimeseriesDefinition {

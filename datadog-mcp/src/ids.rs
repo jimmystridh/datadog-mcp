@@ -41,11 +41,7 @@ define_id!(
     i64,
     "Unique identifier for a scheduled downtime"
 );
-define_id!(
-    SyntheticsTestId,
-    String,
-    "Public ID for a Synthetics test"
-);
+define_id!(SyntheticsTestId, String, "Public ID for a Synthetics test");
 define_id!(IncidentId, String, "Unique identifier for an incident");
 define_id!(SloId, String, "Unique identifier for an SLO");
 define_id!(NotebookId, i64, "Unique identifier for a notebook");

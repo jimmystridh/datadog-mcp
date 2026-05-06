@@ -1,5 +1,5 @@
 #[cfg(feature = "keyring")]
-use keyring::Entry;
+use keyring_core::Entry;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::PathBuf;
@@ -221,6 +221,7 @@ impl DatadogConfig {
     /// Profile defaults to `DD_PROFILE` or `default`.
     #[cfg(feature = "keyring")]
     pub fn from_keyring() -> crate::Result<Self> {
+        configure_native_keyring_store()?;
         let profile = std::env::var("DD_PROFILE").unwrap_or_else(|_| "default".to_string());
         let entry = Entry::new(KEYRING_SERVICE, &profile)
             .map_err(|e| crate::Error::ConfigError(format!("Failed to access keyring: {e}")))?;
@@ -239,6 +240,7 @@ impl DatadogConfig {
     /// Profile defaults to `DD_PROFILE` or `default`.
     #[cfg(feature = "keyring")]
     pub fn store_in_keyring(&self) -> crate::Result<()> {
+        configure_native_keyring_store()?;
         let profile = std::env::var("DD_PROFILE").unwrap_or_else(|_| "default".to_string());
         let entry = Entry::new(KEYRING_SERVICE, &profile)
             .map_err(|e| crate::Error::ConfigError(format!("Failed to access keyring: {e}")))?;
@@ -310,6 +312,13 @@ struct FileCredentials {
 
 #[cfg(feature = "keyring")]
 const KEYRING_SERVICE: &str = "datadog-mcp";
+
+#[cfg(feature = "keyring")]
+fn configure_native_keyring_store() -> crate::Result<()> {
+    keyring::use_native_store(true).map_err(|e| {
+        crate::Error::ConfigError(format!("Failed to configure native keyring store: {e}"))
+    })
+}
 
 #[cfg(test)]
 mod tests {
@@ -452,8 +461,7 @@ mod tests {
         };
 
         let json = serde_json::to_string(&config).expect("Failed to serialize");
-        let deserialized: HttpConfig =
-            serde_json::from_str(&json).expect("Failed to deserialize");
+        let deserialized: HttpConfig = serde_json::from_str(&json).expect("Failed to deserialize");
 
         assert_eq!(config.timeout_secs, deserialized.timeout_secs);
         assert_eq!(

@@ -15,7 +15,7 @@ homepage = "https://github.com/jimmystridh/datadog-mcp"
 
 [workspace.dependencies]
 # Async runtime (only features actually needed)
-tokio = { version = "1.50", features = ["rt-multi-thread", "macros", "fs"] }
+tokio = { version = "1.52", features = ["rt-multi-thread", "macros", "fs"] }
 tokio-util = "0.7"
 
 # HTTP client
@@ -47,7 +47,8 @@ regex = "1.12"
 zeroize = { version = "1.8", features = ["derive"] }
 
 # Secure storage (platform keyrings)
-keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "sync-secret-service"] }
+keyring = "4"
+keyring-core = "1"
 
 # JSON-RPC
 async-trait = "0.1"

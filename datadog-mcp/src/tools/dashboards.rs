@@ -1,10 +1,10 @@
 //! Dashboard tools
 
 use crate::ids::DashboardId;
+use crate::input_validation::{validate_dashboard_layout, validate_dashboard_title};
 use crate::response::{simple_success_with_fields, tool_error};
 use crate::sanitize::{sanitize_name, sanitize_optional, MAX_MESSAGE_LENGTH, MAX_NAME_LENGTH};
 use crate::state::ToolContext;
-use crate::input_validation::{validate_dashboard_layout, validate_dashboard_title};
 use datadog_api::models::{Dashboard, Widget};
 use serde_json::{json, Value};
 use tracing::info;
@@ -179,7 +179,10 @@ pub async fn update_dashboard(
     )
 }
 
-pub async fn delete_dashboard(ctx: ToolContext, dashboard_id: DashboardId) -> anyhow::Result<Value> {
+pub async fn delete_dashboard(
+    ctx: ToolContext,
+    dashboard_id: DashboardId,
+) -> anyhow::Result<Value> {
     info!("Deleting dashboard: {}", dashboard_id);
 
     let api = ctx.dashboards_api();

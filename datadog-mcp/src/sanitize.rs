@@ -55,7 +55,9 @@ fn sanitize_string(input: &str, max_length: usize) -> String {
 
 /// Sanitize an optional string, returning None if empty after sanitization
 pub fn sanitize_optional(input: Option<String>, max_length: usize) -> Option<String> {
-    input.map(|s| sanitize_string(&s, max_length)).filter(|s| !s.is_empty())
+    input
+        .map(|s| sanitize_string(&s, max_length))
+        .filter(|s| !s.is_empty())
 }
 
 /// Sanitize a vector of tags
@@ -95,7 +97,10 @@ mod tests {
 
     #[test]
     fn test_sanitize_name_preserves_newlines_tabs() {
-        assert_eq!(sanitize_name("Line1\nLine2\tTabbed"), "Line1\nLine2\tTabbed");
+        assert_eq!(
+            sanitize_name("Line1\nLine2\tTabbed"),
+            "Line1\nLine2\tTabbed"
+        );
     }
 
     #[test]

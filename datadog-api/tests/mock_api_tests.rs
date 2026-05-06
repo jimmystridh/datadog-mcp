@@ -619,9 +619,7 @@ async fn test_events_api_list() {
     let client = create_test_client(&mock_server).await;
     let api = EventsApi::new(client);
 
-    let result = api
-        .list_events(1699900000, 1700100000, None, None)
-        .await;
+    let result = api.list_events(1699900000, 1700100000, None, None).await;
     assert!(result.is_ok());
 
     let response = result.unwrap();

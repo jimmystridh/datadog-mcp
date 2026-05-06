@@ -40,6 +40,7 @@ macro_rules! tool_call {
 #[derive(Clone)]
 pub struct DatadogMcpServer {
     pub state: Arc<ServerState>,
+    #[allow(dead_code)]
     tool_router: ToolRouter<Self>,
 }
 

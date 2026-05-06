@@ -1,10 +1,15 @@
 //! Monitor tools
 
+use crate::input_validation::{
+    validate_monitor_name, validate_monitor_query, validate_monitor_type,
+};
 use crate::response::{simple_success_with_fields, tool_error};
-use crate::sanitize::{sanitize_name, sanitize_optional, sanitize_query, MAX_MESSAGE_LENGTH, MAX_NAME_LENGTH, MAX_QUERY_LENGTH};
+use crate::sanitize::{
+    sanitize_name, sanitize_optional, sanitize_query, MAX_MESSAGE_LENGTH, MAX_NAME_LENGTH,
+    MAX_QUERY_LENGTH,
+};
 use crate::state::ToolContext;
 use crate::tool_inputs::{MonitorId, MonitorOptions};
-use crate::input_validation::{validate_monitor_name, validate_monitor_query, validate_monitor_type};
 use datadog_api::models::*;
 use serde_json::{json, Value};
 use std::collections::HashMap;

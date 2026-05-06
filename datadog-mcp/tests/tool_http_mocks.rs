@@ -8,7 +8,15 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn assert_success(out: &serde_json::Value) {
     let status = out["status"].as_str().unwrap_or("");
-    let success_statuses = ["success", "created", "deleted", "cancelled", "ok", "live", "updated"];
+    let success_statuses = [
+        "success",
+        "created",
+        "deleted",
+        "cancelled",
+        "ok",
+        "live",
+        "updated",
+    ];
     assert!(
         success_statuses.contains(&status),
         "Expected success-like status, got: {}",
@@ -290,7 +298,9 @@ async fn delete_dashboard_success() {
     let server = MockServer::start().await;
     Mock::given(method("DELETE"))
         .and(path("/api/v1/dashboard/old-dash"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"deleted_dashboard_id": "old-dash"})))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"deleted_dashboard_id": "old-dash"})),
+        )
         .mount(&server)
         .await;
 
@@ -491,7 +501,10 @@ async fn trigger_synthetics_tests_success() {
     let ctx = mock_context(&server).await;
     let out = tools::trigger_synthetics_tests(
         ctx,
-        vec![SyntheticsTestId("test-1".into()), SyntheticsTestId("test-2".into())],
+        vec![
+            SyntheticsTestId("test-1".into()),
+            SyntheticsTestId("test-2".into()),
+        ],
     )
     .await
     .unwrap();

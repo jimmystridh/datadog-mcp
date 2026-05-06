@@ -9,11 +9,8 @@ use datadog_api::{apis::MetricsApi, config::DatadogConfig, DatadogClient};
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Method 1: Direct configuration
-    let config = DatadogConfig::new(
-        "your-api-key".to_string(),
-        "your-app-key".to_string(),
-    )
-    .with_site("datadoghq.eu".to_string()); // Use EU datacenter
+    let config = DatadogConfig::new("your-api-key".to_string(), "your-app-key".to_string())
+        .with_site("datadoghq.eu".to_string()); // Use EU datacenter
 
     println!("Config 1 - Site: {}", config.site);
     println!("Config 1 - Base URL: {}", config.base_url());

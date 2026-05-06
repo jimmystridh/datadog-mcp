@@ -1,7 +1,9 @@
 //! Synthetics testing tools
 
 use crate::ids::SyntheticsTestId;
-use crate::sanitize::{sanitize_name, sanitize_optional, sanitize_tags, MAX_MESSAGE_LENGTH, MAX_NAME_LENGTH};
+use crate::sanitize::{
+    sanitize_name, sanitize_optional, sanitize_tags, MAX_MESSAGE_LENGTH, MAX_NAME_LENGTH,
+};
 use crate::state::ToolContext;
 use datadog_api::models::*;
 use serde_json::{json, Value};

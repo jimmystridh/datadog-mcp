@@ -10,7 +10,8 @@ use tracing::{debug, error, trace};
 fn sanitize_log_message(message: &str) -> String {
     use regex::Regex;
 
-    let key_pattern = r#"dd-api-key|dd-application-key|DD_API_KEY|DD_APP_KEY|api_key|app_key|apikey|appkey"#;
+    let key_pattern =
+        r#"dd-api-key|dd-application-key|DD_API_KEY|DD_APP_KEY|api_key|app_key|apikey|appkey"#;
 
     let patterns = [
         // JSON style: "api_key": "value" or "api_key":"value"
@@ -26,7 +27,9 @@ fn sanitize_log_message(message: &str) -> String {
     let mut result = message.to_string();
     for pattern in patterns {
         if let Ok(re) = Regex::new(&pattern) {
-            result = re.replace_all(&result, "\"$1\": \"[REDACTED]\"").to_string();
+            result = re
+                .replace_all(&result, "\"$1\": \"[REDACTED]\"")
+                .to_string();
         }
     }
     result
@@ -58,7 +61,10 @@ impl DatadogClient {
     /// # Errors
     ///
     /// Returns an error if the HTTP client cannot be built.
-    pub fn with_rate_limit(config: DatadogConfig, rate_limit_config: RateLimitConfig) -> Result<Self> {
+    pub fn with_rate_limit(
+        config: DatadogConfig,
+        rate_limit_config: RateLimitConfig,
+    ) -> Result<Self> {
         let retry_policy = ExponentialBackoff::builder()
             .retry_bounds(
                 Duration::from_millis(config.retry_config.initial_backoff_ms),

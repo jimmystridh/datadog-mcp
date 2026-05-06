@@ -1,7 +1,8 @@
 //! Benchmarks for serialization performance
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use datadog_api::{HttpConfig, RetryConfig, TimestampMillis, TimestampNanos, TimestampSecs};
+use std::hint::black_box;
 
 fn timestamp_benchmarks(c: &mut Criterion) {
     let mut group = c.benchmark_group("timestamps");

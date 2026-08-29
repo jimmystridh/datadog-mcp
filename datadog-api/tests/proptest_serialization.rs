@@ -84,6 +84,8 @@ proptest! {
             pool_max_idle_per_host: pool_size,
             pool_idle_timeout_secs: idle_timeout,
             tcp_keepalive_secs: keepalive,
+            total_timeout_secs: timeout.saturating_mul(3),
+            max_response_bytes: 10 * 1024 * 1024,
         };
 
         let json = serde_json::to_string(&config).unwrap();
@@ -93,6 +95,8 @@ proptest! {
         prop_assert_eq!(config.pool_max_idle_per_host, parsed.pool_max_idle_per_host);
         prop_assert_eq!(config.pool_idle_timeout_secs, parsed.pool_idle_timeout_secs);
         prop_assert_eq!(config.tcp_keepalive_secs, parsed.tcp_keepalive_secs);
+        prop_assert_eq!(config.total_timeout_secs, parsed.total_timeout_secs);
+        prop_assert_eq!(config.max_response_bytes, parsed.max_response_bytes);
     }
 
     // Cache info validator property
@@ -205,7 +209,7 @@ fn rate_limit_config_disabled_constructor() {
 
 #[test]
 fn widget_note_roundtrip() {
-    use datadog_api::models::{Widget, WidgetDefinition, NoteDefinition};
+    use datadog_api::models::{NoteDefinition, Widget, WidgetDefinition};
 
     let widget = Widget {
         definition: WidgetDefinition::Note(NoteDefinition {
@@ -234,7 +238,7 @@ fn widget_note_roundtrip() {
 
 #[test]
 fn widget_timeseries_roundtrip() {
-    use datadog_api::models::{Widget, WidgetDefinition, TimeseriesDefinition, TimeseriesRequest};
+    use datadog_api::models::{TimeseriesDefinition, TimeseriesRequest, Widget, WidgetDefinition};
 
     let widget = Widget {
         definition: WidgetDefinition::Timeseries(TimeseriesDefinition {

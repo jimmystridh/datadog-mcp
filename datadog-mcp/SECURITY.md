@@ -8,15 +8,18 @@ This document describes the security measures implemented in the Datadog MCP ser
 
 Credentials are loaded in this order (first available wins):
 
-1. **Credentials file**: `~/.datadog-mcp/credentials.json`
+1. **Environment variables**: `DD_API_KEY`, `DD_APP_KEY`, `DD_SITE`
 2. **System keyring** (requires `keyring` feature): OS-native secure storage
-3. **Environment variables**: `DD_API_KEY`, `DD_APP_KEY`, `DD_SITE`
+3. **Credentials file**: `~/.datadog-mcp/credentials.json`
+
+Setting either key environment variable makes environment loading authoritative. Partial environment credentials fail closed instead of falling back.
 
 ### Secret Protection
 
 - **Zeroize on drop**: API keys use `SecretString` wrapper with `zeroize` crate
 - **Memory is overwritten** when credentials go out of scope
 - **Debug/Display redaction**: Credentials print as `[REDACTED]` in logs
+- **No general serialization**: `DatadogConfig` and `SecretString` do not implement `Serialize`
 
 ```rust
 // Credentials are never exposed in debug output
@@ -27,15 +30,16 @@ println!("{:?}", config);  // Shows "[REDACTED]" for keys
 ### File Permissions
 
 - Cache files are created with **0600 permissions** (owner read/write only)
-- Credentials file should be protected: `chmod 600 ~/.datadog-mcp/credentials.json`
+- Credentials files with group/other permissions are rejected on Unix; use `chmod 600 ~/.datadog-mcp/credentials.json`
 
 ## Network Security
 
 ### TLS/HTTPS
 
-- All API requests use HTTPS exclusively
+- API requests use HTTPS; plaintext HTTP base-URL overrides are accepted only for loopback test servers
 - TLS certificate verification is enabled (system trust store)
 - No support for disabling certificate verification
+- Decoded response bodies are bounded before deserialization (10 MiB by default)
 
 ### Request Authentication
 
@@ -61,9 +65,11 @@ Error messages and logs are sanitized to remove credential patterns:
 ### Cache Security
 
 - Cache directory: `~/.cache/datadog-mcp/` (XDG compliant)
-- Files created with restrictive permissions (Unix 0600)
-- Contains API response data, not credentials
-- Automatic cleanup available via `cleanup_cache` tool
+- Caching is off by default and requires `--cache-responses`
+- Directory mode is 0700 and file mode is 0600 on Unix
+- Logs, users, events, incidents, and security-rule responses are never cached
+- Retention defaults to 24 hours and total size defaults to 100 MiB
+- Cache analysis canonicalizes paths, confines reads to the cache, permits only JSON/TOON files, and limits reads to 10 MiB
 
 ## Rate Limiting
 
@@ -89,7 +95,7 @@ Only valid layouts: `ordered` or `free`
 ### Input Sanitization
 
 - Tag values: sanitized to alphanumeric + allowed special chars
-- Query strings: length-limited, special chars escaped
+- Query strings: length-limited and passed through Datadog's query grammar without logging their contents
 - Names: truncated to reasonable lengths
 
 ## Threat Model
@@ -103,6 +109,9 @@ Only valid layouts: `ordered` or `free`
 | Unauthorized file access | 0600 permissions |
 | Rate limit abuse | Client-side limiting |
 | Invalid API input | Type-safe validation |
+| Unintended Datadog mutation | Read-only default; explicit `--allow-write` opt-in |
+| Cache path traversal | Canonical path confinement and file-size/type checks |
+| Oversized API responses | Streaming response-size enforcement before deserialization |
 
 ### Out of Scope
 

@@ -7,7 +7,7 @@
 use datadog_api::{
     apis::{DashboardsApi, MetricsApi, MonitorsApi, SyntheticsApi},
     config::DatadogConfig,
-    DatadogClient,
+    DatadogClient, TimestampSecs,
 };
 
 #[tokio::main]
@@ -40,14 +40,17 @@ async fn main() -> anyhow::Result<()> {
 
     // Query metrics
     println!("\n=== Metrics ===");
-    let now = chrono::Utc::now().timestamp();
+    let now = TimestampSecs::now().0;
     let hour_ago = now - 3600;
     let metrics = metrics_api
         .query_metrics(hour_ago, now, "avg:system.cpu.user{*}")
         .await?;
     println!(
         "CPU metrics series: {}",
-        metrics.series.as_ref().map(|s| s.len()).unwrap_or(0)
+        metrics
+            .data
+            .as_ref()
+            .map_or(0, |data| data.attributes.series.len())
     );
 
     // Query synthetics

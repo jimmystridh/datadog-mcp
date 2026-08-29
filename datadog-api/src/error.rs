@@ -5,9 +5,6 @@ pub enum Error {
     #[error("HTTP request failed: {0}")]
     HttpError(#[from] reqwest::Error),
 
-    #[error("Middleware error: {0}")]
-    MiddlewareError(#[from] reqwest_middleware::Error),
-
     #[error("JSON serialization/deserialization error: {0}")]
     JsonError(#[from] serde_json::Error),
 
@@ -22,6 +19,14 @@ pub enum Error {
 
     #[error("Invalid response format: {0}")]
     InvalidResponse(String),
+
+    #[error("Request deadline exceeded after {0} seconds")]
+    RequestDeadlineExceeded(u64),
+
+    #[error(
+        "Response body exceeded the configured {limit}-byte limit (received at least {size} bytes)"
+    )]
+    ResponseTooLarge { size: usize, limit: usize },
 }
 
 impl Error {
@@ -79,7 +84,7 @@ impl Error {
                 *status == 429 || (500..=504).contains(status)
             }
             Error::HttpError(e) => e.is_connect() || e.is_timeout(),
-            Error::MiddlewareError(_) => true,
+            Error::RequestDeadlineExceeded(_) => true,
             _ => false,
         }
     }

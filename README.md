@@ -14,13 +14,16 @@ A high-performance [Model Context Protocol](https://modelcontextprotocol.io/) (M
 - **35+ MCP Tools** — Full coverage of Datadog's core APIs: metrics, monitors, dashboards, logs, synthetics, incidents, and more
 - **TOON Output Format** — Optional [Token-Oriented Object Notation](https://github.com/toon-format/toon) reduces token usage by 30-60% compared to JSON
 - **Async & Non-blocking** — Built on Tokio for high throughput and responsiveness
-- **Automatic Retry** — Exponential backoff handles rate limits gracefully
-- **Local Caching** — All API responses cached for analysis and replay
+- **Safe Retry** — Read-only requests retry transient failures and honor Datadog rate-limit reset headers; writes are never retried automatically
+- **Optional Local Caching** — Non-sensitive responses can be cached explicitly for analysis and replay
+- **Read-Only by Default** — Datadog mutations require the explicit `--allow-write` startup flag
 - **Modular Architecture** — Standalone `datadog-api` crate usable in other Rust projects
 
 ## Quick Start
 
 ### 1. Build
+
+Requires Rust 1.88 or newer.
 
 ```bash
 git clone <repository-url>
@@ -37,7 +40,7 @@ export DD_SITE="datadoghq.eu"  # or datadoghq.com, us3.datadoghq.com, etc.
 
 # Optional: store credentials in your system keyring (macOS Keychain, Windows Credential Manager, Secret Service)
 DD_PROFILE=default ./target/release/datadog-mcp --store-credentials
-# Afterwards you can unset the env vars; the server will read from keyring first, then ~/.datadog-mcp/credentials.json, then env vars.
+# Afterwards you can unset the env vars; the server will read from keyring, then ~/.datadog-mcp/credentials.json.
 ```
 
 ### 3. Run
@@ -53,6 +56,11 @@ DD_PROFILE=default ./target/release/datadog-mcp --store-credentials
 | Option | Values | Default | Description |
 |--------|--------|---------|-------------|
 | `--format` | `json`, `toon` | `toon` | Output format for MCP responses |
+| `--allow-write` | flag | off | Enable tools that mutate Datadog resources |
+| `--cache-responses` | flag | off | Cache non-sensitive API responses locally |
+| `--cache-retention-hours` | integer | `24` | Remove older cache files at startup |
+| `--cache-max-mib` | integer | `100` | Bound the cache; remove oldest files first |
+| `--store-credentials` | flag | off | Store env/file credentials in the system keyring and exit |
 
 ### Environment Variables
 
@@ -65,9 +73,11 @@ DD_PROFILE=default ./target/release/datadog-mcp --store-credentials
 | `RUST_LOG` | No | Log level: `error`, `warn`, `info`, `debug`, `trace` |
 
 ### Credential Storage Order
-1. System keyring (`datadog-mcp` service, profile `DD_PROFILE` or `default`)
-2. `~/.datadog-mcp/credentials.json` (`{"api_key":"...","app_key":"...","site":"..."}`)
-3. Environment variables (`DD_API_KEY`, `DD_APP_KEY`, `DD_SITE`)
+1. Environment variables (`DD_API_KEY`, `DD_APP_KEY`, `DD_SITE`)
+2. System keyring (`datadog-mcp` service, profile `DD_PROFILE` or `default`)
+3. `~/.datadog-mcp/credentials.json` (`{"api_key":"...","app_key":"...","site":"..."}`; mode `0600` required on Unix)
+
+If either key environment variable is set, environment loading is authoritative and a partial pair is rejected rather than silently falling back.
 
 ### Supported Datadog Sites
 
@@ -78,7 +88,10 @@ DD_PROFILE=default ./target/release/datadog-mcp --store-credentials
 | US5 | `us5.datadoghq.com` |
 | EU | `datadoghq.eu` |
 | AP1 | `ap1.datadoghq.com` |
+| AP2 | `ap2.datadoghq.com` |
+| UK1 | `uk1.datadoghq.com` |
 | US1-FED | `ddog-gov.com` |
+| US2-FED | `us2.ddog-gov.com` |
 
 ## MCP Client Setup
 
@@ -130,7 +143,7 @@ Add to your project's `.mcp.json`:
 |------|-------------|
 | `validate_api_key` | Verify API credentials |
 | `get_metrics` | Query time series data |
-| `search_metrics` | Find metrics by name pattern |
+| `search_metrics` | Find active metrics by name and optional active-since timestamp |
 | `get_metric_metadata` | Retrieve metric metadata |
 | `get_monitors` | List all monitors |
 | `get_monitor` | Get specific monitor by ID |
@@ -152,7 +165,7 @@ Add to your project's `.mcp.json`:
 
 | Tool | Description |
 |------|-------------|
-| `search_logs` | Query log entries with filters |
+| `search_logs` | Query one cursor-paginated page of log entries |
 | `get_events` | Retrieve system events |
 
 ### Infrastructure
@@ -186,7 +199,7 @@ Add to your project's `.mcp.json`:
 | Tool | Description |
 |------|-------------|
 | `get_security_rules` | Retrieve security monitoring rules |
-| `get_incidents` | Access incident data |
+| `get_incidents` | Access one offset-paginated incident page |
 | `get_slos` | Get Service Level Objectives |
 | `get_notebooks` | Retrieve Datadog notebooks |
 
@@ -194,8 +207,8 @@ Add to your project's `.mcp.json`:
 
 | Tool | Description |
 |------|-------------|
-| `get_teams` | List teams |
-| `get_users` | List users |
+| `get_teams` | List one page of teams |
+| `get_users` | List one page of users |
 
 ### Utilities
 
@@ -238,16 +251,15 @@ TOON is the default format. Use `--format json` if you need standard JSON output
 
 ## Caching
 
-All API responses are cached locally for offline analysis and debugging:
+Caching is disabled by default. Enable it with `--cache-responses`; results remain available inline through MCP `structuredContent` whether caching is enabled or not.
 
 ```
-datadog_cache/
+~/.cache/datadog-mcp/
 ├── monitors_1700000000_a1b2c3d4.toon
-├── dashboards_1700000001_e5f6g7h8.toon
-└── logs_1700000002_i9j0k1l2.json
+└── dashboards_1700000001_e5f6g7h8.toon
 ```
 
-Cache files use the configured output format. Use `cleanup_cache` to remove old files:
+The cache directory is mode `0700` and files are mode `0600` on Unix. Logs, users, events, incidents, and security-rule responses are never cached. Cache analysis is confined to this directory and refuses files larger than 10 MiB. The startup retention/size limits run automatically; `cleanup_cache` is also available when write mode is enabled.
 
 ```
 cleanup_cache(older_than_hours: 24)

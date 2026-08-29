@@ -30,8 +30,12 @@ pub struct GetMetricsInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct SearchMetricsInput {
-    #[schemars(description = "Search pattern for metric names")]
+    #[schemars(description = "Case-insensitive substring to match against active metric names")]
     pub query: String,
+    #[schemars(
+        description = "Only include metrics active since this Unix timestamp; defaults to 24 hours ago"
+    )]
+    pub from_timestamp: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -56,6 +60,8 @@ pub struct CreateMonitorInput {
     pub query: String,
     #[schemars(description = "Monitor message")]
     pub message: Option<String>,
+    #[schemars(description = "Tags applied to the monitor")]
+    pub tags: Option<Vec<String>>,
     #[schemars(description = "Monitor options")]
     pub options: Option<MonitorOptions>,
 }
@@ -70,6 +76,8 @@ pub struct UpdateMonitorInput {
     pub query: Option<String>,
     #[schemars(description = "Monitor message")]
     pub message: Option<String>,
+    #[schemars(description = "Tags applied to the monitor")]
+    pub tags: Option<Vec<String>>,
     #[schemars(description = "Monitor options")]
     pub options: Option<MonitorOptions>,
 }
@@ -144,6 +152,8 @@ pub struct SearchLogsInput {
     pub to_time: String,
     #[schemars(description = "Result limit")]
     pub limit: Option<i32>,
+    #[schemars(description = "Cursor returned by the previous log search page")]
+    pub cursor: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -226,6 +236,24 @@ pub struct CancelDowntimeInput {
 pub struct GetIncidentsInput {
     #[schemars(description = "Page size for pagination")]
     pub page_size: Option<i32>,
+    #[schemars(description = "Offset returned by the previous incidents page")]
+    pub page_offset: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct GetTeamsInput {
+    #[schemars(description = "One-based page number")]
+    pub page_number: Option<i64>,
+    #[schemars(description = "Number of teams per page (1-100)")]
+    pub page_size: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct GetUsersInput {
+    #[schemars(description = "One-based page number")]
+    pub page_number: Option<i64>,
+    #[schemars(description = "Number of users per page (1-100)")]
+    pub page_size: Option<i64>,
 }
 
 // ============================================================================
@@ -338,14 +366,31 @@ mod tests {
             "monitor_type": "metric alert",
             "query": "avg:system.cpu.user{*} > 80",
             "message": "CPU is high!",
-            "options": {"notify_no_data": true}
+            "tags": ["service:api", "team:platform"],
+            "options": {
+                "notify_no_data": true,
+                "no_data_timeframe": 10,
+                "evaluation_delay": 120,
+                "renotify_interval": 60,
+                "include_tags": true,
+                "require_full_window": false,
+                "new_group_delay": 300
+            }
         }"#;
 
         let input: CreateMonitorInput = serde_json::from_str(json).unwrap();
 
         assert_eq!(input.name, "CPU Alert");
         assert_eq!(input.monitor_type, "metric alert");
-        assert!(input.options.is_some());
+        assert_eq!(input.tags.unwrap(), ["service:api", "team:platform"]);
+
+        let options: datadog_api::models::MonitorOptions = input.options.unwrap().into();
+        assert_eq!(options.no_data_timeframe, Some(10));
+        assert_eq!(options.evaluation_delay, Some(120));
+        assert_eq!(options.renotify_interval, Some(60));
+        assert_eq!(options.include_tags, Some(true));
+        assert_eq!(options.require_full_window, Some(false));
+        assert_eq!(options.new_group_delay, Some(300));
     }
 
     #[test]
@@ -360,6 +405,7 @@ mod tests {
 
         assert_eq!(input.name, "Test Monitor");
         assert!(input.message.is_none());
+        assert!(input.tags.is_none());
         assert!(input.options.is_none());
     }
 
@@ -370,6 +416,7 @@ mod tests {
             from_time: "now-15m".to_string(),
             to_time: "now".to_string(),
             limit: Some(100),
+            cursor: None,
         };
 
         let json = serde_json::to_string(&input).unwrap();
@@ -466,8 +513,20 @@ pub struct MonitorOptions {
     pub thresholds: Option<MonitorThresholds>,
     #[schemars(description = "Notify when no data is received")]
     pub notify_no_data: Option<bool>,
+    #[schemars(description = "Minutes without data before notifying")]
+    pub no_data_timeframe: Option<i64>,
     #[schemars(description = "Evaluation delay in seconds")]
     pub evaluation_delay: Option<i64>,
+    #[schemars(description = "Minutes before renotifying while the monitor remains triggered")]
+    pub renotify_interval: Option<i64>,
+    #[schemars(description = "Message sent when the monitor renotifies")]
+    pub escalation_message: Option<String>,
+    #[schemars(description = "Include triggering tags in notifications")]
+    pub include_tags: Option<bool>,
+    #[schemars(description = "Require a full evaluation window before evaluating")]
+    pub require_full_window: Option<bool>,
+    #[schemars(description = "Seconds to wait before evaluating a newly seen group")]
+    pub new_group_delay: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -493,9 +552,13 @@ impl From<MonitorOptions> for datadog_api::models::MonitorOptions {
         datadog_api::models::MonitorOptions {
             thresholds: src.thresholds.map(|t| t.into()),
             notify_no_data: src.notify_no_data,
-            no_data_timeframe: src.evaluation_delay,
-            renotify_interval: None,
-            escalation_message: None,
+            no_data_timeframe: src.no_data_timeframe,
+            evaluation_delay: src.evaluation_delay,
+            renotify_interval: src.renotify_interval,
+            escalation_message: src.escalation_message,
+            include_tags: src.include_tags,
+            require_full_window: src.require_full_window,
+            new_group_delay: src.new_group_delay,
         }
     }
 }

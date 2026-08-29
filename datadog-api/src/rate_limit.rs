@@ -101,7 +101,8 @@ impl RateLimiter {
                 // Refill tokens based on elapsed time
                 let now = Instant::now();
                 let elapsed_ms = now.duration_since(state.last_update).as_millis() as f64;
-                state.tokens = (state.tokens + elapsed_ms * state.refill_rate).min(state.max_tokens);
+                state.tokens =
+                    (state.tokens + elapsed_ms * state.refill_rate).min(state.max_tokens);
                 state.last_update = now;
 
                 if state.tokens >= 1.0 {

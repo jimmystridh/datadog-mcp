@@ -1,7 +1,9 @@
 //! Synthetics testing tools
 
 use crate::ids::SyntheticsTestId;
-use crate::sanitize::{sanitize_name, sanitize_optional, sanitize_tags, MAX_MESSAGE_LENGTH, MAX_NAME_LENGTH};
+use crate::sanitize::{
+    sanitize_name, sanitize_optional, sanitize_tags, MAX_MESSAGE_LENGTH, MAX_NAME_LENGTH,
+};
 use crate::state::ToolContext;
 use datadog_api::models::*;
 use serde_json::{json, Value};
@@ -264,38 +266,42 @@ pub async fn update_synthetics_test(
         anyhow::anyhow!("Failed to get existing test: {}", e)
     })?;
 
-    // Merge updates with existing configuration
-    let updated_config = if let Some(new_url) = url {
-        SyntheticsTestConfig {
-            request: SyntheticsTestRequest {
-                url: new_url,
-                method: existing.config.request.method.clone(),
-                timeout: existing.config.request.timeout,
-                headers: existing.config.request.headers.clone(),
-                body: existing.config.request.body.clone(),
-            },
-            assertions: existing.config.assertions.clone(),
-        }
-    } else {
-        existing.config.clone()
-    };
+    let mut updated_request = existing;
+    let test = updated_request
+        .as_object_mut()
+        .ok_or_else(|| anyhow::anyhow!("Datadog returned a non-object Synthetics test"))?;
 
-    let updated_request = SyntheticsTestCreateRequest {
-        name: name.unwrap_or(existing.name),
-        test_type: existing.test_type,
-        subtype: existing.subtype,
-        config: updated_config,
-        options: SyntheticsTestOptions {
-            tick_every: tick_every.unwrap_or(existing.options.tick_every),
-            retry: existing.options.retry,
-            min_failure_duration: existing.options.min_failure_duration,
-            min_location_failed: existing.options.min_location_failed,
-        },
-        locations: locations.unwrap_or(existing.locations),
-        message: message.or(existing.message),
-        tags: tags.or(existing.tags),
-        status: Some(existing.status),
-    };
+    if let Some(name) = name {
+        test.insert("name".to_string(), json!(name));
+    }
+    if let Some(locations) = locations {
+        test.insert("locations".to_string(), json!(locations));
+    }
+    if let Some(message) = message {
+        test.insert("message".to_string(), json!(message));
+    }
+    if let Some(tags) = tags {
+        test.insert("tags".to_string(), json!(tags));
+    }
+    if let Some(tick_every) = tick_every {
+        let options = test
+            .get_mut("options")
+            .and_then(Value::as_object_mut)
+            .ok_or_else(|| anyhow::anyhow!("Synthetics response has no options object"))?;
+        options.insert("tick_every".to_string(), json!(tick_every));
+    }
+    if let Some(url) = url {
+        let request = test
+            .get_mut("config")
+            .and_then(Value::as_object_mut)
+            .and_then(|config| config.get_mut("request"))
+            .and_then(Value::as_object_mut)
+            .ok_or_else(|| anyhow::anyhow!("Synthetics response has no config.request object"))?;
+        request.insert("url".to_string(), json!(url));
+    }
+    test.remove("public_id");
+    test.remove("created_at");
+    test.remove("modified_at");
 
     // Send the update
     let result = api.update_test(&public_id.0, &updated_request).await;
@@ -305,12 +311,15 @@ pub async fn update_synthetics_test(
         "synthetics_test_updated",
         ctx,
         data,
-        format!("Updated Synthetics test: {}", data.name),
+        format!(
+            "Updated Synthetics test: {}",
+            data["name"].as_str().unwrap_or("Unnamed")
+        ),
         {
             json!({
-                "public_id": data.public_id,
-                "name": data.name,
-                "status": data.status,
+                "public_id": data["public_id"],
+                "name": data["name"],
+                "status": data["status"],
             })
         }
     )

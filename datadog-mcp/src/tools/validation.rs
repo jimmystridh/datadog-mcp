@@ -7,8 +7,7 @@ use tracing::{error, info};
 pub async fn validate_api_key(ctx: ToolContext) -> anyhow::Result<Value> {
     info!("Validating API credentials");
 
-    let api = ctx.monitors_api();
-    let result = api.list_monitors_with_page_size(1).await;
+    let result = ctx.client.validate_keys().await;
 
     match result {
         Ok(_) => {

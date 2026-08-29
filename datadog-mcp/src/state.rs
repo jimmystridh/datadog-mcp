@@ -13,6 +13,7 @@ use datadog_api::{
     },
     DatadogClient, DatadogConfig,
 };
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::output::OutputFormat;
@@ -21,6 +22,29 @@ pub struct ServerState {
     pub client: Arc<DatadogClient>,
     pub config: DatadogConfig,
     pub output_format: OutputFormat,
+    pub allow_write: bool,
+    pub cache_responses: bool,
+    pub cache_dir: PathBuf,
+    pub cache_max_bytes: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct ServerOptions {
+    pub allow_write: bool,
+    pub cache_responses: bool,
+    pub cache_dir: PathBuf,
+    pub cache_max_bytes: u64,
+}
+
+impl Default for ServerOptions {
+    fn default() -> Self {
+        Self {
+            allow_write: false,
+            cache_responses: false,
+            cache_dir: crate::cache::default_cache_dir(),
+            cache_max_bytes: 100 * 1024 * 1024,
+        }
+    }
 }
 
 /// Context passed to tool functions containing client and output format
@@ -28,6 +52,10 @@ pub struct ServerState {
 pub struct ToolContext {
     pub client: Arc<DatadogClient>,
     pub output_format: OutputFormat,
+    pub allow_write: bool,
+    pub cache_responses: bool,
+    pub cache_dir: PathBuf,
+    pub cache_max_bytes: u64,
 }
 
 impl ToolContext {
@@ -35,6 +63,25 @@ impl ToolContext {
         Self {
             client,
             output_format,
+            allow_write: false,
+            cache_responses: false,
+            cache_dir: crate::cache::default_cache_dir(),
+            cache_max_bytes: 100 * 1024 * 1024,
+        }
+    }
+
+    pub fn with_options(
+        client: Arc<DatadogClient>,
+        output_format: OutputFormat,
+        options: &ServerOptions,
+    ) -> Self {
+        Self {
+            client,
+            output_format,
+            allow_write: options.allow_write,
+            cache_responses: options.cache_responses,
+            cache_dir: options.cache_dir.clone(),
+            cache_max_bytes: options.cache_max_bytes,
         }
     }
 
@@ -97,22 +144,41 @@ impl ToolContext {
 
 impl ServerState {
     pub async fn new(config: DatadogConfig, output_format: OutputFormat) -> Result<Self> {
+        Self::new_with_options(config, output_format, ServerOptions::default()).await
+    }
+
+    pub async fn new_with_options(
+        config: DatadogConfig,
+        output_format: OutputFormat,
+        options: ServerOptions,
+    ) -> Result<Self> {
         let client = DatadogClient::new(config.clone())?;
         Ok(Self {
             client: Arc::new(client),
             config,
             output_format,
+            allow_write: options.allow_write,
+            cache_responses: options.cache_responses,
+            cache_dir: options.cache_dir,
+            cache_max_bytes: options.cache_max_bytes,
         })
     }
 
     pub fn tool_context(&self) -> ToolContext {
-        ToolContext::new(self.client.clone(), self.output_format)
+        ToolContext::with_options(
+            self.client.clone(),
+            self.output_format,
+            &ServerOptions {
+                allow_write: self.allow_write,
+                cache_responses: self.cache_responses,
+                cache_dir: self.cache_dir.clone(),
+                cache_max_bytes: self.cache_max_bytes,
+            },
+        )
     }
 
     pub async fn test_connection(&self) -> Result<()> {
-        // Test with a simple API call (list monitors with minimal results)
-        let api = MonitorsApi::new((*self.client).clone());
-        api.list_monitors_with_page_size(1).await?;
+        self.client.validate_keys().await?;
         Ok(())
     }
 }
@@ -136,9 +202,9 @@ mod tests {
     #[tokio::test]
     async fn test_server_state_tool_context() {
         let config = test_config();
-        let state = ServerState::new(config, OutputFormat::Toon).await.unwrap();
+        let state = ServerState::new(config, OutputFormat::Json).await.unwrap();
         let ctx = state.tool_context();
-        assert_eq!(ctx.output_format, OutputFormat::Toon);
+        assert_eq!(ctx.output_format, OutputFormat::Json);
     }
 
     #[test]
@@ -176,7 +242,7 @@ mod tests {
     fn test_tool_context_clone() {
         let config = test_config();
         let client = DatadogClient::new(config).unwrap();
-        let ctx = ToolContext::new(Arc::new(client), OutputFormat::Toon);
+        let ctx = ToolContext::new(Arc::new(client), OutputFormat::Json);
         let cloned = ctx.clone();
         assert_eq!(cloned.output_format, ctx.output_format);
     }

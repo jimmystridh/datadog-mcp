@@ -42,7 +42,7 @@
 //! ## Quick Start
 //!
 //! ```no_run
-//! use datadog_api::{DatadogClient, DatadogConfig};
+//! use datadog_api::{DatadogClient, DatadogConfig, TimestampSecs};
 //! use datadog_api::apis::MetricsApi;
 //!
 //! #[tokio::main]
@@ -50,7 +50,9 @@
 //!     let config = DatadogConfig::from_env()?;
 //!     let client = DatadogClient::new(config)?;
 //!     let metrics_api = MetricsApi::new(client);
-//!     let metrics = metrics_api.list_metrics("system.cpu").await?;
+//!     let metrics = metrics_api
+//!         .list_active_metrics(TimestampSecs::now().0 - 86_400)
+//!         .await?;
 //!     println!("Found {} metrics", metrics.metrics.unwrap_or_default().len());
 //!     Ok(())
 //! }
@@ -102,9 +104,9 @@ pub use client::{CacheInfo, CachedResponse, DatadogClient};
 pub use config::{DatadogConfig, HttpConfig, RetryConfig};
 pub use error::{Error, Result};
 pub use models::{
-    GroupDefinition, HeatmapDefinition, NoteDefinition, QueryTableDefinition,
-    QueryValueDefinition, TemplateVariable, TimeseriesDefinition, ToplistDefinition, Widget,
-    WidgetDefinition, WidgetLayout,
+    GroupDefinition, HeatmapDefinition, NoteDefinition, QueryTableDefinition, QueryValueDefinition,
+    TemplateVariable, TimeseriesDefinition, ToplistDefinition, Widget, WidgetDefinition,
+    WidgetLayout,
 };
 pub use pagination::{CursorParams, PageParams, PaginatedResponse, PaginationMeta};
 pub use rate_limit::{RateLimitConfig, RateLimiter};

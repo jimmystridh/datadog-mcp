@@ -321,9 +321,9 @@ async fn test_dashboards_api_get() {
     assert!(result.is_ok());
 
     let dashboard = result.unwrap();
-    assert_eq!(dashboard.id, Some("abc-123".to_string()));
-    assert_eq!(dashboard.title, Some("Test Dashboard".to_string()));
-    assert!(dashboard.widgets.is_some());
+    assert_eq!(dashboard["id"], "abc-123");
+    assert_eq!(dashboard["title"], "Test Dashboard");
+    assert!(dashboard["widgets"].is_array());
 }
 
 #[tokio::test]
@@ -343,22 +343,17 @@ async fn test_dashboards_api_create() {
     let client = create_test_client(&mock_server).await;
     let api = DashboardsApi::new(client);
 
-    let dashboard = Dashboard {
-        id: None,
-        title: Some("New Dashboard".to_string()),
-        description: None,
-        widgets: Some(vec![]),
-        layout_type: Some("ordered".to_string()),
-        is_read_only: None,
-        notify_list: None,
-        template_variables: None,
-    };
+    let dashboard = serde_json::json!({
+        "title": "New Dashboard",
+        "widgets": [],
+        "layout_type": "ordered"
+    });
 
     let result = api.create_dashboard(&dashboard).await;
     assert!(result.is_ok());
 
     let created = result.unwrap();
-    assert_eq!(created.id, Some("new-dash-123".to_string()));
+    assert_eq!(created["id"], "new-dash-123");
 }
 
 #[tokio::test]
@@ -378,22 +373,17 @@ async fn test_dashboards_api_update() {
     let client = create_test_client(&mock_server).await;
     let api = DashboardsApi::new(client);
 
-    let dashboard = Dashboard {
-        id: Some("abc-123".to_string()),
-        title: Some("Updated Dashboard".to_string()),
-        description: None,
-        widgets: Some(vec![]),
-        layout_type: Some("ordered".to_string()),
-        is_read_only: None,
-        notify_list: None,
-        template_variables: None,
-    };
+    let dashboard = serde_json::json!({
+        "title": "Updated Dashboard",
+        "widgets": [],
+        "layout_type": "ordered"
+    });
 
     let result = api.update_dashboard("abc-123", &dashboard).await;
     assert!(result.is_ok());
 
     let updated = result.unwrap();
-    assert_eq!(updated.title, Some("Updated Dashboard".to_string()));
+    assert_eq!(updated["title"], "Updated Dashboard");
 }
 
 #[tokio::test]
@@ -423,17 +413,21 @@ async fn test_dashboards_api_delete() {
 async fn test_metrics_api_query() {
     let mock_server = MockServer::start().await;
 
-    Mock::given(method("GET"))
-        .and(path("/api/v1/query"))
+    Mock::given(method("POST"))
+        .and(path("/api/v2/query/timeseries"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "series": [
-                {
-                    "metric": "system.cpu.user",
-                    "pointlist": [[1700000000.0, 50.5], [1700000060.0, 55.2]],
-                    "scope": "host:web-01"
-                }
-            ],
-            "status": "ok"
+            "data": {
+                "attributes": {
+                    "series": [{
+                        "group_tags": ["host:web-01"],
+                        "query_index": 0,
+                        "unit": null
+                    }],
+                    "times": [1700000000000_i64, 1700000060000_i64],
+                    "values": [[50.5, 55.2]]
+                },
+                "type": "timeseries_response"
+            }
         })))
         .mount(&mock_server)
         .await;
@@ -447,9 +441,10 @@ async fn test_metrics_api_query() {
     assert!(result.is_ok());
 
     let response = result.unwrap();
-    let series = response.series.unwrap();
-    assert_eq!(series.len(), 1);
-    assert_eq!(series[0].metric, Some("system.cpu.user".to_string()));
+    let attributes = response.data.unwrap().attributes;
+    assert_eq!(attributes.series.len(), 1);
+    assert_eq!(attributes.series[0].group_tags, ["host:web-01"]);
+    assert_eq!(attributes.values[0], [Some(50.5), Some(55.2)]);
 }
 
 #[tokio::test]
@@ -458,7 +453,7 @@ async fn test_metrics_api_list() {
 
     Mock::given(method("GET"))
         .and(path("/api/v1/metrics"))
-        .and(query_param("q", "system.cpu"))
+        .and(query_param("from", "1700000000"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "metrics": ["system.cpu.user", "system.cpu.system", "system.cpu.idle"]
         })))
@@ -468,7 +463,7 @@ async fn test_metrics_api_list() {
     let client = create_test_client(&mock_server).await;
     let api = MetricsApi::new(client);
 
-    let result = api.list_metrics("system.cpu").await;
+    let result = api.list_active_metrics(1700000000).await;
     assert!(result.is_ok());
 
     let response = result.unwrap();
@@ -619,9 +614,7 @@ async fn test_events_api_list() {
     let client = create_test_client(&mock_server).await;
     let api = EventsApi::new(client);
 
-    let result = api
-        .list_events(1699900000, 1700100000, None, None)
-        .await;
+    let result = api.list_events(1699900000, 1700100000, None, None).await;
     assert!(result.is_ok());
 
     let response = result.unwrap();
@@ -871,8 +864,8 @@ async fn test_synthetics_api_get_test() {
     assert!(result.is_ok());
 
     let test = result.unwrap();
-    assert_eq!(test.public_id, "abc-def-123");
-    assert_eq!(test.name, "API Health Check");
+    assert_eq!(test["public_id"], "abc-def-123");
+    assert_eq!(test["name"], "API Health Check");
 }
 
 #[tokio::test]
@@ -1018,7 +1011,7 @@ async fn test_incidents_api_list() {
     let client = create_test_client(&mock_server).await;
     let api = IncidentsApi::new(client);
 
-    let result = api.list_incidents(Some(10)).await;
+    let result = api.list_incidents(Some(10), None).await;
     assert!(result.is_ok());
 
     let response = result.unwrap();
@@ -1147,7 +1140,7 @@ async fn test_teams_api_list() {
     let mock_server = MockServer::start().await;
 
     Mock::given(method("GET"))
-        .and(path("/api/v2/teams"))
+        .and(path("/api/v2/team"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "data": [
                 {
@@ -1165,7 +1158,7 @@ async fn test_teams_api_list() {
     let client = create_test_client(&mock_server).await;
     let api = TeamsApi::new(client);
 
-    let result = api.list_teams().await;
+    let result = api.list_teams(None, None).await;
     assert!(result.is_ok());
 
     let response = result.unwrap();
@@ -1182,15 +1175,17 @@ async fn test_users_api_list() {
     let mock_server = MockServer::start().await;
 
     Mock::given(method("GET"))
-        .and(path("/api/v1/users"))
+        .and(path("/api/v2/users"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "users": [
+            "data": [
                 {
                     "id": "user-001",
-                    "name": "John Doe",
-                    "email": "john@example.com",
-                    "handle": "john.doe",
-                    "verified": true
+                    "attributes": {
+                        "name": "John Doe",
+                        "email": "john@example.com",
+                        "handle": "john.doe",
+                        "verified": true
+                    }
                 }
             ]
         })))
@@ -1200,13 +1195,16 @@ async fn test_users_api_list() {
     let client = create_test_client(&mock_server).await;
     let api = UsersApi::new(client);
 
-    let result = api.list_users().await;
+    let result = api.list_users(None, None).await;
     assert!(result.is_ok());
 
     let response = result.unwrap();
-    let users = response.users.unwrap();
+    let users = response.data.unwrap();
     assert_eq!(users.len(), 1);
-    assert_eq!(users[0].email, Some("john@example.com".to_string()));
+    assert_eq!(
+        users[0].attributes.as_ref().unwrap()["email"],
+        "john@example.com"
+    );
 }
 
 // ============================================================================
@@ -1214,13 +1212,14 @@ async fn test_users_api_list() {
 // ============================================================================
 
 #[tokio::test]
-async fn test_traces_api_send() {
+async fn test_spans_api_search() {
     let mock_server = MockServer::start().await;
 
     Mock::given(method("POST"))
-        .and(path("/v0.4/traces"))
+        .and(path("/api/v2/spans/events/search"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "status": "ok"
+            "data": [{"id": "span-1", "type": "spans", "attributes": {}}],
+            "meta": {"page": {"after": "next"}}
         })))
         .mount(&mock_server)
         .await;
@@ -1228,56 +1227,27 @@ async fn test_traces_api_send() {
     let client = create_test_client(&mock_server).await;
     let api = TracesApi::new(client);
 
-    let span = Span {
-        span_id: 123456789,
-        trace_id: 987654321,
-        parent_id: 0,
-        service: "test-service".to_string(),
-        resource: "/api/test".to_string(),
-        name: "web.request".to_string(),
-        start: 1700000000000000000,
-        duration: 50000000,
-        error: 0,
-        meta: std::collections::HashMap::new(),
-        metrics: std::collections::HashMap::new(),
-        span_type: Some("web".to_string()),
+    let request = SpansSearchRequest {
+        data: SpansSearchData {
+            attributes: SpansSearchRequestAttributes {
+                filter: SpansSearchFilter {
+                    from: "now-15m".to_string(),
+                    query: "service:test-service".to_string(),
+                    to: "now".to_string(),
+                },
+                page: Some(SpansSearchPage {
+                    cursor: None,
+                    limit: Some(10),
+                }),
+                sort: Some("timestamp".to_string()),
+            },
+            resource_type: "search_request".to_string(),
+        },
     };
 
-    let result = api.send_traces(vec![vec![span]]).await;
+    let result = api.search_spans(&request).await;
     assert!(result.is_ok());
-}
-
-#[tokio::test]
-async fn test_traces_api_search() {
-    let mock_server = MockServer::start().await;
-
-    Mock::given(method("GET"))
-        .and(path("/api/v2/traces"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "data": [
-                {
-                    "trace_id": "abc123",
-                    "spans": []
-                }
-            ]
-        })))
-        .mount(&mock_server)
-        .await;
-
-    let client = create_test_client(&mock_server).await;
-    let api = TracesApi::new(client);
-
-    let query = TraceQuery {
-        service: Some("api".to_string()),
-        operation: None,
-        resource: None,
-        start: 1700000000,
-        end: 1700003600,
-        limit: Some(10),
-    };
-
-    let result = api.search_traces(&query).await;
-    assert!(result.is_ok());
+    assert_eq!(result.unwrap().data.unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -1286,22 +1256,24 @@ async fn test_traces_api_list_services() {
 
     Mock::given(method("GET"))
         .and(path("/api/v2/apm/services"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
-            "api-service",
-            "web-service",
-            "database"
-        ])))
+        .and(query_param("filter[env]", "prod"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "data": {
+                "type": "services_list",
+                "attributes": {"services": ["api-service", "web-service", "database"]}
+            }
+        })))
         .mount(&mock_server)
         .await;
 
     let client = create_test_client(&mock_server).await;
     let api = TracesApi::new(client);
 
-    let result = api.list_services(1700000000, 1700003600).await;
+    let result = api.list_services("prod").await;
     assert!(result.is_ok());
 
     let services = result.unwrap();
-    assert!(services.contains(&"api-service".to_string()));
+    assert_eq!(services.data["attributes"]["services"][0], "api-service");
 }
 
 // ============================================================================
@@ -1330,6 +1302,62 @@ async fn test_server_error_is_retryable() {
     assert!(err.is_server_error());
     assert!(err.is_retryable());
     assert_eq!(err.status_code(), Some(503));
+}
+
+#[tokio::test]
+async fn read_requests_retry_but_write_requests_do_not() {
+    let read_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/retry-read"))
+        .respond_with(ResponseTemplate::new(503).set_body_string("unavailable"))
+        .mount(&read_server)
+        .await;
+    let mut read_config = DatadogConfig::new("test_api_key".into(), "test_app_key".into())
+        .with_base_url(read_server.uri());
+    read_config.retry_config.max_retries = 2;
+    read_config.retry_config.initial_backoff_ms = 1;
+    read_config.retry_config.max_backoff_ms = 2;
+    let read_client = DatadogClient::new(read_config).unwrap();
+    let _: datadog_api::Result<serde_json::Value> = read_client.get("/retry-read").await;
+    assert_eq!(read_server.received_requests().await.unwrap().len(), 3);
+
+    let write_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/write-once"))
+        .respond_with(ResponseTemplate::new(503).set_body_string("unavailable"))
+        .mount(&write_server)
+        .await;
+    let mut write_config = DatadogConfig::new("test_api_key".into(), "test_app_key".into())
+        .with_base_url(write_server.uri());
+    write_config.retry_config.max_retries = 2;
+    let write_client = DatadogClient::new(write_config).unwrap();
+    let _: datadog_api::Result<serde_json::Value> = write_client
+        .post("/write-once", &serde_json::json!({}))
+        .await;
+    assert_eq!(write_server.received_requests().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn response_bodies_are_bounded_before_deserialization() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/oversized"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "data": "x".repeat(128)
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let mut config = DatadogConfig::new("test_api_key".into(), "test_app_key".into())
+        .with_base_url(mock_server.uri());
+    config.http_config.max_response_bytes = 32;
+    let client = DatadogClient::new(config).unwrap();
+
+    let result: datadog_api::Result<serde_json::Value> = client.get("/oversized").await;
+    assert!(matches!(
+        result,
+        Err(datadog_api::Error::ResponseTooLarge { limit: 32, .. })
+    ));
 }
 
 #[tokio::test]

@@ -18,7 +18,7 @@ impl LogsApi {
 
     pub async fn search_logs(&self, request: &LogsSearchRequest) -> Result<LogsSearchResponse> {
         self.client
-            .post("/api/v2/logs/events/search", request)
+            .post_retryable("/api/v2/logs/events/search", request)
             .await
     }
 }

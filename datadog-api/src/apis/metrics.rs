@@ -1,6 +1,6 @@
 use crate::{
     client::DatadogClient,
-    models::{MetricMetadata, MetricsListResponse, MetricsQueryResponse},
+    models::{MetricMetadata, MetricsListResponse, TimeseriesFormulaQueryResponse},
     Result,
 };
 use serde::Serialize;
@@ -27,31 +27,40 @@ impl MetricsApi {
         from: i64,
         to: i64,
         query: &str,
-    ) -> Result<MetricsQueryResponse> {
-        #[derive(Serialize)]
-        struct QueryParams<'a> {
-            from: i64,
-            to: i64,
-            query: &'a str,
-        }
+    ) -> Result<TimeseriesFormulaQueryResponse> {
+        let request = serde_json::json!({
+            "data": {
+                "attributes": {
+                    "formulas": [{"formula": "a"}],
+                    "from": from.saturating_mul(1000),
+                    "queries": [{
+                        "data_source": "metrics",
+                        "name": "a",
+                        "query": query,
+                    }],
+                    "to": to.saturating_mul(1000),
+                },
+                "type": "timeseries_request",
+            }
+        });
 
-        let params = QueryParams { from, to, query };
-
-        self.client.get_with_query("/api/v1/query", &params).await
+        self.client
+            .post_retryable("/api/v2/query/timeseries", &request)
+            .await
     }
 
-    /// List active metrics matching a query.
+    /// List metrics that have reported data since the provided timestamp.
     ///
     /// # Errors
     ///
     /// Returns an error if the API request fails.
-    pub async fn list_metrics(&self, query: &str) -> Result<MetricsListResponse> {
+    pub async fn list_active_metrics(&self, from: i64) -> Result<MetricsListResponse> {
         #[derive(Serialize)]
-        struct QueryParams<'a> {
-            q: &'a str,
+        struct QueryParams {
+            from: i64,
         }
 
-        let params = QueryParams { q: query };
+        let params = QueryParams { from };
 
         self.client.get_with_query("/api/v1/metrics", &params).await
     }

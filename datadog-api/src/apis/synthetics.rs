@@ -7,6 +7,7 @@ use crate::{
     },
     Result,
 };
+use serde_json::Value;
 
 /// API client for Datadog synthetics endpoints.
 pub struct SyntheticsApi {
@@ -24,7 +25,7 @@ impl SyntheticsApi {
         self.client.get("/api/v1/synthetics/tests").await
     }
 
-    pub async fn get_test(&self, public_id: &str) -> Result<SyntheticsTestResponse> {
+    pub async fn get_test(&self, public_id: &str) -> Result<Value> {
         let endpoint = format!("/api/v1/synthetics/tests/{}", public_id);
         self.client.get(&endpoint).await
     }
@@ -42,12 +43,8 @@ impl SyntheticsApi {
             .await
     }
 
-    pub async fn update_test(
-        &self,
-        public_id: &str,
-        request: &SyntheticsTestCreateRequest,
-    ) -> Result<SyntheticsTestResponse> {
-        let endpoint = format!("/api/v1/synthetics/tests/api/{}", public_id);
+    pub async fn update_test(&self, public_id: &str, request: &Value) -> Result<Value> {
+        let endpoint = format!("/api/v1/synthetics/tests/{}", public_id);
         self.client.put(&endpoint, request).await
     }
 

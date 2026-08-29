@@ -3,12 +3,20 @@ use datadog_mcp::state::ToolContext;
 use datadog_mcp::tool_inputs::{DashboardId, DowntimeId, MonitorId, SyntheticsTestId};
 use datadog_mcp::tools;
 use serde_json::json;
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{body_json, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn assert_success(out: &serde_json::Value) {
     let status = out["status"].as_str().unwrap_or("");
-    let success_statuses = ["success", "created", "deleted", "cancelled", "ok", "live", "updated"];
+    let success_statuses = [
+        "success",
+        "created",
+        "deleted",
+        "cancelled",
+        "ok",
+        "live",
+        "updated",
+    ];
     assert!(
         success_statuses.contains(&status),
         "Expected success-like status, got: {}",
@@ -33,15 +41,17 @@ async fn mock_context(server: &MockServer) -> ToolContext {
 #[tokio::test]
 async fn get_metrics_success() {
     let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/api/v1/query"))
+    Mock::given(method("POST"))
+        .and(path("/api/v2/query/timeseries"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "series": [
-                {
-                    "pointlist": [[1, 2.0], [2, 3.0]],
-                    "scope": "host:local"
-                }
-            ]
+            "data": {
+                "attributes": {
+                    "series": [{"group_tags": ["host:local"], "query_index": 0}],
+                    "times": [1000, 2000],
+                    "values": [[2.0, 3.0]]
+                },
+                "type": "timeseries_response"
+            }
         })))
         .mount(&server)
         .await;
@@ -49,7 +59,8 @@ async fn get_metrics_success() {
     let ctx = mock_context(&server).await;
     let out = tools::get_metrics(ctx, "test".into(), 0, 10).await.unwrap();
     assert_eq!(out["status"], "success");
-    assert!(out["filepath"].as_str().unwrap().contains("metrics_"));
+    assert!(out["filepath"].is_null());
+    assert!(out["data"].is_object());
     assert_eq!(out["series_count"], 1);
     assert_eq!(out["data_points"], 2);
 }
@@ -57,8 +68,8 @@ async fn get_metrics_success() {
 #[tokio::test]
 async fn get_metrics_unauthorized() {
     let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/api/v1/query"))
+    Mock::given(method("POST"))
+        .and(path("/api/v2/query/timeseries"))
         .respond_with(ResponseTemplate::new(401).set_body_string("unauthorized"))
         .mount(&server)
         .await;
@@ -66,6 +77,36 @@ async fn get_metrics_unauthorized() {
     let ctx = mock_context(&server).await;
     let out = tools::get_metrics(ctx, "test".into(), 0, 10).await.unwrap();
     assert_eq!(out["status"], "error");
+}
+
+#[tokio::test]
+async fn search_metrics_filters_active_metrics_since_requested_timestamp() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/metrics"))
+        .and(query_param("from", "1700000000"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "metrics": [
+                "system.cpu.user",
+                "sqlserver.database.state",
+                "SQLServer.queries.count"
+            ]
+        })))
+        .mount(&server)
+        .await;
+
+    let ctx = mock_context(&server).await;
+    let out = tools::search_metrics(ctx, "sqlserver".into(), Some(1_700_000_000))
+        .await
+        .unwrap();
+
+    assert_eq!(out["status"], "success");
+    assert_eq!(out["from_timestamp"], 1_700_000_000);
+    assert_eq!(out["metric_count"], 2);
+    assert_eq!(
+        out["sample_metrics"],
+        json!(["sqlserver.database.state", "SQLServer.queries.count"])
+    );
 }
 
 #[tokio::test]
@@ -103,11 +144,117 @@ async fn search_logs_success() {
         "now-1h".into(),
         "now".into(),
         Some(10),
+        None,
     )
     .await
     .unwrap();
     assert_eq!(out["status"], "success");
     assert_eq!(out["log_count"], 2);
+}
+
+#[tokio::test]
+async fn update_dashboard_preserves_unknown_fields_and_widgets() {
+    let server = MockServer::start().await;
+    let existing = json!({
+        "id": "dash-1",
+        "title": "Before",
+        "layout_type": "ordered",
+        "widgets": [{
+            "definition": {
+                "type": "geomap",
+                "requests": [{"custom": "preserve-me"}]
+            }
+        }],
+        "custom_top_level": {"future_field": true}
+    });
+    Mock::given(method("GET"))
+        .and(path("/api/v1/dashboard/dash-1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(existing))
+        .mount(&server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/dashboard/dash-1"))
+        .and(body_json(json!({
+            "title": "After",
+            "layout_type": "ordered",
+            "widgets": [{
+                "definition": {
+                    "type": "geomap",
+                    "requests": [{"custom": "preserve-me"}]
+                }
+            }],
+            "custom_top_level": {"future_field": true}
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "dash-1",
+            "title": "After",
+            "layout_type": "ordered"
+        })))
+        .mount(&server)
+        .await;
+
+    let ctx = mock_context(&server).await;
+    let out = tools::update_dashboard(
+        ctx,
+        DashboardId("dash-1".into()),
+        Some("After".into()),
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(out["status"], "updated");
+}
+
+#[tokio::test]
+async fn update_synthetics_preserves_browser_specific_fields() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/synthetics/tests/browser-1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "public_id": "browser-1",
+            "name": "Before",
+            "type": "browser",
+            "config": {"assertions": [], "future_config": true},
+            "options": {"tick_every": 300, "future_option": "keep"},
+            "locations": ["aws:eu-central-1"],
+            "steps": [{"type": "goToUrl", "params": {"value": "https://example.com"}}],
+            "status": "live"
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/synthetics/tests/browser-1"))
+        .and(body_json(json!({
+            "name": "After",
+            "type": "browser",
+            "config": {"assertions": [], "future_config": true},
+            "options": {"tick_every": 300, "future_option": "keep"},
+            "locations": ["aws:eu-central-1"],
+            "steps": [{"type": "goToUrl", "params": {"value": "https://example.com"}}],
+            "status": "live"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "public_id": "browser-1",
+            "name": "After",
+            "status": "live"
+        })))
+        .mount(&server)
+        .await;
+
+    let ctx = mock_context(&server).await;
+    let out = tools::update_synthetics_test(
+        ctx,
+        SyntheticsTestId("browser-1".into()),
+        Some("After".into()),
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(out["status"], "live");
 }
 
 // ============================================================================
@@ -163,6 +310,28 @@ async fn get_monitor_success() {
     assert_success(&out);
     assert_eq!(out["monitor_id"], 123);
     assert_eq!(out["monitor_name"], "Test Monitor");
+    assert_eq!(out["status"], "ok");
+}
+
+#[tokio::test]
+async fn get_monitor_preserves_no_data_status() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/monitor/124"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": 124,
+            "name": "New Monitor",
+            "overall_state": "No Data",
+            "monitor_type": "metric alert",
+            "query": "avg(last_5m):avg:system.cpu.user{*} > 80"
+        })))
+        .mount(&server)
+        .await;
+
+    let ctx = mock_context(&server).await;
+    let out = tools::get_monitor(ctx, MonitorId(124)).await.unwrap();
+
+    assert_eq!(out["status"], "no_data");
 }
 
 #[tokio::test]
@@ -186,6 +355,7 @@ async fn create_monitor_success() {
         "metric alert".into(),
         "avg(last_5m):avg:system.cpu.user{*} > 80".into(),
         Some("Alert message".into()),
+        None,
         None,
     )
     .await
@@ -290,7 +460,9 @@ async fn delete_dashboard_success() {
     let server = MockServer::start().await;
     Mock::given(method("DELETE"))
         .and(path("/api/v1/dashboard/old-dash"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"deleted_dashboard_id": "old-dash"})))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"deleted_dashboard_id": "old-dash"})),
+        )
         .mount(&server)
         .await;
 
@@ -491,7 +663,10 @@ async fn trigger_synthetics_tests_success() {
     let ctx = mock_context(&server).await;
     let out = tools::trigger_synthetics_tests(
         ctx,
-        vec![SyntheticsTestId("test-1".into()), SyntheticsTestId("test-2".into())],
+        vec![
+            SyntheticsTestId("test-1".into()),
+            SyntheticsTestId("test-2".into()),
+        ],
     )
     .await
     .unwrap();
@@ -615,7 +790,7 @@ async fn get_slos_success() {
 async fn get_teams_success() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path("/api/v2/teams"))
+        .and(path("/api/v2/team"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "data": [
                 {"id": "team-1", "attributes": {"name": "Platform Team"}},
@@ -626,7 +801,7 @@ async fn get_teams_success() {
         .await;
 
     let ctx = mock_context(&server).await;
-    let out = tools::get_teams(ctx).await.unwrap();
+    let out = tools::get_teams(ctx, None, None).await.unwrap();
     assert_eq!(out["status"], "success");
     assert_eq!(out["total_teams"], 2);
 }
@@ -635,18 +810,18 @@ async fn get_teams_success() {
 async fn get_users_success() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path("/api/v1/users"))
+        .and(path("/api/v2/users"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "users": [
-                {"id": "user-1", "email": "alice@example.com", "status": "Active"},
-                {"id": "user-2", "email": "bob@example.com", "status": "Active"}
+            "data": [
+                {"id": "user-1", "attributes": {"email": "alice@example.com", "status": "Active"}},
+                {"id": "user-2", "attributes": {"email": "bob@example.com", "status": "Active"}}
             ]
         })))
         .mount(&server)
         .await;
 
     let ctx = mock_context(&server).await;
-    let out = tools::get_users(ctx).await.unwrap();
+    let out = tools::get_users(ctx, None, None).await.unwrap();
     assert_success(&out);
     assert_eq!(out["total_users"], 2);
 }
@@ -699,6 +874,7 @@ async fn create_monitor_invalid_type() {
         "avg(last_5m):avg:system.cpu.user{*} > 80".into(),
         None,
         None,
+        None,
     )
     .await
     .unwrap();
@@ -720,6 +896,7 @@ async fn create_monitor_empty_name() {
         "avg(last_5m):avg:system.cpu.user{*} > 80".into(),
         None,
         None,
+        None,
     )
     .await
     .unwrap();
@@ -736,6 +913,7 @@ async fn create_monitor_empty_query() {
         "Test Monitor".into(),
         "metric alert".into(),
         "".into(), // Empty query
+        None,
         None,
         None,
     )

@@ -1,33 +1,35 @@
 use crate::rate_limit::{RateLimitConfig, RateLimiter};
 use crate::{config::DatadogConfig, error::Error, Result};
-use reqwest::{header, Client, Response};
-use reqwest_middleware::{ClientBuilder, ClientWithMiddleware, RequestBuilder};
-use reqwest_retry::{policies::ExponentialBackoff, RetryTransientMiddleware};
+use futures_util::StreamExt;
+use reqwest::{header, Client, RequestBuilder, Response, StatusCode};
 use serde::de::DeserializeOwned;
-use std::time::Duration;
-use tracing::{debug, error, trace};
+use std::future::Future;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use tracing::{debug, error, trace, warn};
 
 fn sanitize_log_message(message: &str) -> String {
-    use regex::Regex;
-
-    let key_pattern = r#"dd-api-key|dd-application-key|DD_API_KEY|DD_APP_KEY|api_key|app_key|apikey|appkey"#;
+    use regex::regex;
 
     let patterns = [
-        // JSON style: "api_key": "value" or "api_key":"value"
-        format!(r#"(?i)"({key_pattern})"\s*:\s*"([^"]*)""#),
-        // Header/env style with quoted value: api_key: "value" or api_key="value"
-        format!(r#"(?i)({key_pattern})\s*[:=]\s*"([^"]*)""#),
-        // Header/env style with single-quoted value
-        format!(r#"(?i)({key_pattern})\s*[:=]\s*'([^']*)'"#),
-        // Header/env style with unquoted value
-        format!(r#"(?i)({key_pattern})\s*[:=]\s*([^\s,}}"'\n]+)"#),
+        regex!(
+            r#"(?i)"(dd-api-key|dd-application-key|DD_API_KEY|DD_APP_KEY|api_key|app_key|apikey|appkey)"\s*:\s*"([^"]*)""#
+        ),
+        regex!(
+            r#"(?i)(dd-api-key|dd-application-key|DD_API_KEY|DD_APP_KEY|api_key|app_key|apikey|appkey)\s*[:=]\s*"([^"]*)""#
+        ),
+        regex!(
+            r#"(?i)(dd-api-key|dd-application-key|DD_API_KEY|DD_APP_KEY|api_key|app_key|apikey|appkey)\s*[:=]\s*'([^']*)'"#
+        ),
+        regex!(
+            r#"(?i)(dd-api-key|dd-application-key|DD_API_KEY|DD_APP_KEY|api_key|app_key|apikey|appkey)\s*[:=]\s*([^\s,}}"'\n]+)"#
+        ),
     ];
 
     let mut result = message.to_string();
-    for pattern in patterns {
-        if let Ok(re) = Regex::new(&pattern) {
-            result = re.replace_all(&result, "\"$1\": \"[REDACTED]\"").to_string();
-        }
+    for pattern in &patterns {
+        result = pattern
+            .replace_all(&result, "\"$1\": \"[REDACTED]\"")
+            .to_string();
     }
     result
 }
@@ -38,7 +40,7 @@ fn sanitize_log_message(message: &str) -> String {
 /// Includes client-side rate limiting to prevent hitting Datadog's API limits.
 #[derive(Clone)]
 pub struct DatadogClient {
-    client: ClientWithMiddleware,
+    client: Client,
     config: DatadogConfig,
     rate_limiter: RateLimiter,
 }
@@ -58,18 +60,21 @@ impl DatadogClient {
     /// # Errors
     ///
     /// Returns an error if the HTTP client cannot be built.
-    pub fn with_rate_limit(config: DatadogConfig, rate_limit_config: RateLimitConfig) -> Result<Self> {
-        let retry_policy = ExponentialBackoff::builder()
-            .retry_bounds(
-                Duration::from_millis(config.retry_config.initial_backoff_ms),
-                Duration::from_millis(config.retry_config.max_backoff_ms),
-            )
-            .build_with_max_retries(config.retry_config.max_retries);
+    pub fn with_rate_limit(
+        config: DatadogConfig,
+        rate_limit_config: RateLimitConfig,
+    ) -> Result<Self> {
+        config.validate_site()?;
+        if rate_limit_config.enabled && rate_limit_config.requests_per_second == 0 {
+            return Err(Error::ConfigError(
+                "Rate limit must be greater than zero when enabled".to_string(),
+            ));
+        }
 
-        let retry_middleware = RetryTransientMiddleware::new_with_policy(retry_policy);
-
+        let default_headers = Self::default_headers(&config)?;
         let http_config = &config.http_config;
         let mut builder = Client::builder()
+            .default_headers(default_headers)
             .timeout(Duration::from_secs(http_config.timeout_secs))
             .pool_max_idle_per_host(http_config.pool_max_idle_per_host)
             .pool_idle_timeout(Duration::from_secs(http_config.pool_idle_timeout_secs))
@@ -79,11 +84,7 @@ impl DatadogClient {
             builder = builder.tcp_keepalive(Duration::from_secs(keepalive_secs));
         }
 
-        let base_client = builder.build().map_err(Error::HttpError)?;
-
-        let client = ClientBuilder::new(base_client)
-            .with(retry_middleware)
-            .build();
+        let client = builder.build().map_err(Error::HttpError)?;
 
         let rate_limiter = RateLimiter::new(rate_limit_config);
 
@@ -100,6 +101,11 @@ impl DatadogClient {
         &self.config
     }
 
+    /// Validate both API and application keys with Datadog's dedicated endpoint.
+    pub async fn validate_keys(&self) -> Result<serde_json::Value> {
+        self.get("/api/v2/validate_keys").await
+    }
+
     /// Checks if an endpoint corresponds to an unstable operation.
     fn is_unstable_operation(&self, endpoint: &str) -> bool {
         self.config
@@ -108,51 +114,227 @@ impl DatadogClient {
             .any(|op| endpoint.contains(op))
     }
 
-    fn build_headers(&self, endpoint: Option<&str>) -> Result<header::HeaderMap> {
+    fn default_headers(config: &DatadogConfig) -> Result<header::HeaderMap> {
         let mut headers = header::HeaderMap::new();
+        let mut api_key = header::HeaderValue::from_str(config.api_key.expose())
+            .map_err(|e| Error::ConfigError(format!("Invalid API key: {e}")))?;
+        api_key.set_sensitive(true);
+        let mut app_key = header::HeaderValue::from_str(config.app_key.expose())
+            .map_err(|e| Error::ConfigError(format!("Invalid app key: {e}")))?;
+        app_key.set_sensitive(true);
 
-        headers.insert(
-            header::HeaderName::from_static("dd-api-key"),
-            header::HeaderValue::from_str(self.config.api_key.expose())
-                .map_err(|e| Error::ConfigError(format!("Invalid API key: {e}")))?,
-        );
-
+        headers.insert(header::HeaderName::from_static("dd-api-key"), api_key);
         headers.insert(
             header::HeaderName::from_static("dd-application-key"),
-            header::HeaderValue::from_str(self.config.app_key.expose())
-                .map_err(|e| Error::ConfigError(format!("Invalid app key: {e}")))?,
+            app_key,
         );
-
-        headers.insert(
-            header::CONTENT_TYPE,
-            header::HeaderValue::from_static("application/json"),
-        );
-
         headers.insert(
             header::USER_AGENT,
-            header::HeaderValue::from_static("datadog-mcp/0.1.0"),
+            header::HeaderValue::from_static(concat!(
+                env!("CARGO_PKG_NAME"),
+                "/",
+                env!("CARGO_PKG_VERSION")
+            )),
         );
-
-        headers.insert(
-            header::ACCEPT_ENCODING,
-            header::HeaderValue::from_static("gzip"),
-        );
-
-        // Add unstable operation header if needed
-        if let Some(endpoint) = endpoint {
-            if self.is_unstable_operation(endpoint) {
-                headers.insert(
-                    header::HeaderName::from_static("dd-operation-unstable"),
-                    header::HeaderValue::from_static("true"),
-                );
-            }
-        }
 
         Ok(headers)
     }
 
-    fn add_auth_headers(&self, builder: RequestBuilder, endpoint: &str) -> Result<RequestBuilder> {
-        Ok(builder.headers(self.build_headers(Some(endpoint))?))
+    fn add_operation_headers(&self, builder: RequestBuilder, endpoint: &str) -> RequestBuilder {
+        if self.is_unstable_operation(endpoint) {
+            builder.header("dd-operation-unstable", "true")
+        } else {
+            builder
+        }
+    }
+
+    fn retry_backoff(&self, attempt: u32) -> Duration {
+        let multiplier = self
+            .config
+            .retry_config
+            .backoff_multiplier
+            .powi(i32::try_from(attempt).unwrap_or(i32::MAX));
+        let base_ms = (self.config.retry_config.initial_backoff_ms as f64 * multiplier)
+            .min(self.config.retry_config.max_backoff_ms as f64) as u64;
+        let jitter_seed = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .subsec_nanos() as u64;
+        let jitter_ms = if base_ms == 0 {
+            0
+        } else {
+            jitter_seed % (base_ms / 4 + 1)
+        };
+        Duration::from_millis(base_ms.saturating_add(jitter_ms))
+    }
+
+    fn rate_limit_backoff(&self, response: &Response, attempt: u32) -> Duration {
+        response
+            .headers()
+            .get("x-ratelimit-reset")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<u64>().ok())
+            .map(Duration::from_secs)
+            .unwrap_or_else(|| self.retry_backoff(attempt))
+    }
+
+    async fn send_retryable<F>(
+        &self,
+        method: &'static str,
+        endpoint: &str,
+        build: F,
+    ) -> Result<Response>
+    where
+        F: Fn() -> RequestBuilder,
+    {
+        let started = Instant::now();
+        let deadline = Duration::from_secs(self.config.http_config.total_timeout_secs);
+        let mut attempt = 0;
+
+        loop {
+            self.rate_limiter.acquire().await;
+            let response = build().send().await;
+
+            match response {
+                Ok(response) => {
+                    let status = response.status();
+                    let retryable = status == StatusCode::TOO_MANY_REQUESTS
+                        || status == StatusCode::REQUEST_TIMEOUT
+                        || status.is_server_error();
+                    if !retryable || attempt >= self.config.retry_config.max_retries {
+                        debug!(
+                            method,
+                            endpoint,
+                            status = status.as_u16(),
+                            retries = attempt,
+                            duration_ms = started.elapsed().as_millis(),
+                            "Datadog API request completed"
+                        );
+                        return Ok(response);
+                    }
+
+                    let backoff = if status == StatusCode::TOO_MANY_REQUESTS {
+                        self.rate_limit_backoff(&response, attempt)
+                    } else {
+                        self.retry_backoff(attempt)
+                    };
+                    if started.elapsed().saturating_add(backoff) >= deadline {
+                        return Err(Error::RequestDeadlineExceeded(
+                            self.config.http_config.total_timeout_secs,
+                        ));
+                    }
+                    warn!(
+                        method,
+                        endpoint,
+                        status = status.as_u16(),
+                        attempt = attempt + 1,
+                        backoff_ms = backoff.as_millis(),
+                        "Retrying transient Datadog API response"
+                    );
+                    tokio::time::sleep(backoff).await;
+                }
+                Err(error) => {
+                    let retryable = error.is_connect() || error.is_timeout();
+                    if !retryable || attempt >= self.config.retry_config.max_retries {
+                        return Err(Error::HttpError(error));
+                    }
+                    let backoff = self.retry_backoff(attempt);
+                    if started.elapsed().saturating_add(backoff) >= deadline {
+                        return Err(Error::RequestDeadlineExceeded(
+                            self.config.http_config.total_timeout_secs,
+                        ));
+                    }
+                    warn!(
+                        method,
+                        endpoint,
+                        attempt = attempt + 1,
+                        backoff_ms = backoff.as_millis(),
+                        "Retrying transient Datadog transport error"
+                    );
+                    tokio::time::sleep(backoff).await;
+                }
+            }
+
+            attempt += 1;
+        }
+    }
+
+    async fn send_once<F, Fut>(
+        &self,
+        method: &'static str,
+        endpoint: &str,
+        send: F,
+    ) -> Result<Response>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = std::result::Result<Response, reqwest::Error>>,
+    {
+        self.rate_limiter.acquire().await;
+        let started = Instant::now();
+        let response = send().await.map_err(Error::HttpError)?;
+        debug!(
+            method,
+            endpoint,
+            status = response.status().as_u16(),
+            retries = 0,
+            duration_ms = started.elapsed().as_millis(),
+            "Datadog API request completed"
+        );
+        Ok(response)
+    }
+
+    async fn read_response_body(&self, response: Response) -> Result<Vec<u8>> {
+        let limit = self.config.http_config.max_response_bytes;
+        if let Some(length) = response.content_length() {
+            let length = usize::try_from(length).unwrap_or(usize::MAX);
+            if length > limit {
+                return Err(Error::ResponseTooLarge {
+                    size: length,
+                    limit,
+                });
+            }
+        }
+
+        let mut body = Vec::new();
+        let mut stream = response.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(Error::HttpError)?;
+            let size = body.len().saturating_add(chunk.len());
+            if size > limit {
+                return Err(Error::ResponseTooLarge { size, limit });
+            }
+            body.extend_from_slice(&chunk);
+        }
+        Ok(body)
+    }
+
+    async fn api_error(response: Response) -> Error {
+        const MAX_ERROR_BODY_BYTES: usize = 4096;
+
+        let status = response.status().as_u16();
+        let mut body = Vec::new();
+        let mut stream = response.bytes_stream();
+        while body.len() < MAX_ERROR_BODY_BYTES {
+            match stream.next().await {
+                Some(Ok(chunk)) => {
+                    let remaining = MAX_ERROR_BODY_BYTES - body.len();
+                    body.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+                }
+                Some(Err(error)) => {
+                    debug!("Failed to read error response body: {error}");
+                    break;
+                }
+                None => break,
+            }
+        }
+
+        let message = String::from_utf8_lossy(&body);
+        let sanitized_body = sanitize_log_message(&message);
+        error!("API error: {status} - {sanitized_body}");
+        Error::ApiError {
+            status,
+            message: sanitized_body,
+        }
     }
 
     async fn handle_response<T: DeserializeOwned>(&self, response: Response) -> Result<T> {
@@ -160,34 +342,20 @@ impl DatadogClient {
 
         if status.is_success() {
             trace!("Successful response with status: {status}");
-            response.json::<T>().await.map_err(Error::HttpError)
+            let body = self.read_response_body(response).await?;
+            serde_json::from_slice(&body).map_err(Error::JsonError)
         } else {
-            let status_code = status.as_u16();
-            let error_body = response.text().await.unwrap_or_else(|e| {
-                debug!("Failed to read error response body: {e}");
-                format!("(failed to read error body: {e})")
-            });
-
-            let sanitized_body = sanitize_log_message(&error_body);
-            error!("API error: {status_code} - {sanitized_body}");
-
-            Err(Error::ApiError {
-                status: status_code,
-                message: sanitized_body,
-            })
+            Err(Self::api_error(response).await)
         }
     }
 
     pub async fn get<T: DeserializeOwned>(&self, endpoint: &str) -> Result<T> {
-        self.rate_limiter.acquire().await;
-
         let url = format!("{}{}", self.config.base_url(), endpoint);
-        debug!("GET {url}");
-
-        let request = self.client.get(&url);
-        let request = self.add_auth_headers(request, endpoint)?;
-
-        let response = request.send().await.map_err(Error::MiddlewareError)?;
+        let response = self
+            .send_retryable("GET", endpoint, || {
+                self.add_operation_headers(self.client.get(&url), endpoint)
+            })
+            .await?;
 
         self.handle_response(response).await
     }
@@ -197,16 +365,12 @@ impl DatadogClient {
         endpoint: &str,
         query: &Q,
     ) -> Result<T> {
-        self.rate_limiter.acquire().await;
-
         let url = format!("{}{}", self.config.base_url(), endpoint);
-
-        let request = self.client.get(&url).query(query);
-        let request = self.add_auth_headers(request, endpoint)?;
-
-        let response = request.send().await.map_err(Error::MiddlewareError)?;
-
-        debug!("Response status: {}", response.status());
+        let response = self
+            .send_retryable("GET", endpoint, || {
+                self.add_operation_headers(self.client.get(&url).query(query), endpoint)
+            })
+            .await?;
         self.handle_response(response).await
     }
 
@@ -215,20 +379,38 @@ impl DatadogClient {
         endpoint: &str,
         body: &B,
     ) -> Result<T> {
-        self.rate_limiter.acquire().await;
-
         let url = format!("{}{}", self.config.base_url(), endpoint);
-        debug!("POST {url}");
-
         let json_body = serde_json::to_string(body).map_err(Error::JsonError)?;
-        let request = self
-            .client
-            .post(&url)
-            .body(json_body)
-            .header(header::CONTENT_TYPE, "application/json");
-        let request = self.add_auth_headers(request, endpoint)?;
+        let request = self.add_operation_headers(
+            self.client
+                .post(&url)
+                .body(json_body)
+                .header(header::CONTENT_TYPE, "application/json"),
+            endpoint,
+        );
+        let response = self.send_once("POST", endpoint, || request.send()).await?;
+        self.handle_response(response).await
+    }
 
-        let response = request.send().await.map_err(Error::MiddlewareError)?;
+    /// POST a read-only search request with transient retries.
+    pub async fn post_retryable<T: DeserializeOwned, B: serde::Serialize>(
+        &self,
+        endpoint: &str,
+        body: &B,
+    ) -> Result<T> {
+        let url = format!("{}{}", self.config.base_url(), endpoint);
+        let json_body = serde_json::to_string(body).map_err(Error::JsonError)?;
+        let response = self
+            .send_retryable("POST", endpoint, || {
+                self.add_operation_headers(
+                    self.client
+                        .post(&url)
+                        .body(json_body.clone())
+                        .header(header::CONTENT_TYPE, "application/json"),
+                    endpoint,
+                )
+            })
+            .await?;
         self.handle_response(response).await
     }
 
@@ -237,64 +419,40 @@ impl DatadogClient {
         endpoint: &str,
         body: &B,
     ) -> Result<T> {
-        self.rate_limiter.acquire().await;
-
         let url = format!("{}{}", self.config.base_url(), endpoint);
-        debug!("PUT {url}");
-
         let json_body = serde_json::to_string(body).map_err(Error::JsonError)?;
-        let request = self
-            .client
-            .put(&url)
-            .body(json_body)
-            .header(header::CONTENT_TYPE, "application/json");
-        let request = self.add_auth_headers(request, endpoint)?;
-
-        let response = request.send().await.map_err(Error::MiddlewareError)?;
+        let request = self.add_operation_headers(
+            self.client
+                .put(&url)
+                .body(json_body)
+                .header(header::CONTENT_TYPE, "application/json"),
+            endpoint,
+        );
+        let response = self.send_once("PUT", endpoint, || request.send()).await?;
         self.handle_response(response).await
     }
 
     pub async fn delete(&self, endpoint: &str) -> Result<()> {
-        self.rate_limiter.acquire().await;
-
         let url = format!("{}{}", self.config.base_url(), endpoint);
-        debug!("DELETE {url}");
-
-        let request = self.client.delete(&url);
-        let request = self.add_auth_headers(request, endpoint)?;
-
-        let response = request.send().await.map_err(Error::MiddlewareError)?;
+        let request = self.add_operation_headers(self.client.delete(&url), endpoint);
+        let response = self
+            .send_once("DELETE", endpoint, || request.send())
+            .await?;
 
         let status = response.status();
         if status.is_success() {
             Ok(())
         } else {
-            let status_code = status.as_u16();
-            let error_body = response.text().await.unwrap_or_else(|e| {
-                debug!("Failed to read error response body: {e}");
-                format!("(failed to read error body: {e})")
-            });
-
-            let sanitized_body = sanitize_log_message(&error_body);
-            error!("API error: {} - {}", status_code, sanitized_body);
-
-            Err(Error::ApiError {
-                status: status_code,
-                message: sanitized_body,
-            })
+            Err(Self::api_error(response).await)
         }
     }
 
     pub async fn delete_with_response<T: DeserializeOwned>(&self, endpoint: &str) -> Result<T> {
-        self.rate_limiter.acquire().await;
-
         let url = format!("{}{}", self.config.base_url(), endpoint);
-        debug!("DELETE {url}");
-
-        let request = self.client.delete(&url);
-        let request = self.add_auth_headers(request, endpoint)?;
-
-        let response = request.send().await.map_err(Error::MiddlewareError)?;
+        let request = self.add_operation_headers(self.client.delete(&url), endpoint);
+        let response = self
+            .send_once("DELETE", endpoint, || request.send())
+            .await?;
         self.handle_response(response).await
     }
 
@@ -340,11 +498,7 @@ impl DatadogClient {
         endpoint: &str,
         cache_info: Option<&CacheInfo>,
     ) -> Result<Option<CachedResponse<T>>> {
-        self.rate_limiter.acquire().await;
-
         let url = format!("{}{}", self.config.base_url(), endpoint);
-        debug!("GET (cached) {url}");
-
         let mut request = self.client.get(&url);
 
         // Add conditional headers if we have cache info
@@ -357,8 +511,8 @@ impl DatadogClient {
             }
         }
 
-        let request = self.add_auth_headers(request, endpoint)?;
-        let response = request.send().await.map_err(Error::MiddlewareError)?;
+        let request = self.add_operation_headers(request, endpoint);
+        let response = self.send_once("GET", endpoint, || request.send()).await?;
 
         // 304 Not Modified - cached data is still valid
         if response.status() == reqwest::StatusCode::NOT_MODIFIED {
@@ -463,6 +617,19 @@ mod tests {
         let input = "API_KEY=secret123";
         let output = sanitize_log_message(input);
         assert!(!output.contains("secret123"));
+    }
+
+    #[test]
+    fn test_default_headers_mark_credentials_sensitive() {
+        let config = DatadogConfig::new("test_api_key".into(), "test_app_key".into());
+        let headers = DatadogClient::default_headers(&config).unwrap();
+
+        assert!(headers["dd-api-key"].is_sensitive());
+        assert!(headers["dd-application-key"].is_sensitive());
+        assert_eq!(
+            headers[header::USER_AGENT],
+            concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"))
+        );
     }
 
     #[test]

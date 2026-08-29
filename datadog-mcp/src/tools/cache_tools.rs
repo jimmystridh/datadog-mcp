@@ -1,17 +1,19 @@
 //! Cache analysis and management tools
 
-use crate::cache::{cleanup_cache, load_data};
+use crate::cache::{cleanup_cache_in, load_data_in};
 use crate::response::tool_error;
+use crate::state::ToolContext;
 use serde_json::{json, Value};
 use tracing::info;
 
 pub async fn analyze_data(
+    ctx: ToolContext,
     filepath: String,
     analysis_type: Option<String>,
 ) -> anyhow::Result<Value> {
     info!("Analyzing data from: {}", filepath);
 
-    let data = load_data(&filepath).await?;
+    let data = load_data_in(&filepath, &ctx.cache_dir).await?;
     let analysis = analysis_type.unwrap_or_else(|| "summary".to_string());
 
     let result = match analysis.as_str() {
@@ -36,11 +38,14 @@ pub async fn analyze_data(
     }))
 }
 
-pub async fn cleanup_cache_tool(older_than_hours: Option<u64>) -> anyhow::Result<Value> {
+pub async fn cleanup_cache_tool(
+    ctx: ToolContext,
+    older_than_hours: Option<u64>,
+) -> anyhow::Result<Value> {
     let hours = older_than_hours.unwrap_or(24);
     info!("Cleaning up cache files older than {} hours", hours);
 
-    match cleanup_cache(hours).await {
+    match cleanup_cache_in(&ctx.cache_dir, hours).await {
         Ok(deleted_count) => {
             info!(
                 "Cleaned up {} files older than {} hours",
@@ -49,7 +54,7 @@ pub async fn cleanup_cache_tool(older_than_hours: Option<u64>) -> anyhow::Result
             Ok(json!({
                 "summary": format!("Cleaned up {} files older than {} hours", deleted_count, hours),
                 "deleted_count": deleted_count,
-                "cache_directory": "datadog_cache",
+                "cache_directory": ctx.cache_dir,
                 "status": "success",
             }))
         }

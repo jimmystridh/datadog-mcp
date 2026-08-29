@@ -2,6 +2,7 @@
 name = "datadog-mcp"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -24,34 +25,31 @@ keyring = ["datadog-api/keyring"]
 full = ["toon", "keyring"]
 
 [dependencies]
-datadog-api = { path = "../datadog-api", default-features = false }
+datadog-api = { version = "0.2.0", path = "../datadog-api", default-features = false }
 
 # MCP Server SDK
-rmcp = { version = "1.3", features = ["server", "transport-io"] }
+rmcp = { version = "3.1.4", default-features = false, features = ["macros", "server", "transport-io"] }
 
 tokio = { workspace = true }
-tokio-util = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
-dotenv = { workspace = true }
+dotenvy = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-async-trait = { workspace = true }
 
 # CLI argument parsing
-clap = { version = "4.6", features = ["derive"] }
+clap = { version = "4.6.6", features = ["derive"] }
 
 # JSON Schema generation for tool input schemas
-schemars = { version = "1", features = ["derive"] }
+schemars = { version = "1.2.2", features = ["derive"] }
 
 # TOON format for token-efficient LLM output (optional)
-toon = { version = "0.1", optional = true }
+toon = { version = "0.1.2", optional = true }
 
 [dev-dependencies]
-tempfile = "3.27"
-wiremock = "0.6"
-serial_test = "3.4"
+tempfile = "3.27.0"
+wiremock = "0.6.5"

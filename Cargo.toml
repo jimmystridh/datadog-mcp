@@ -6,8 +6,9 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
+rust-version = "1.88"
 authors = ["Jimmy Stridh"]
 license = "MIT"
 repository = "https://github.com/jimmystridh/datadog-mcp"
@@ -15,39 +16,34 @@ homepage = "https://github.com/jimmystridh/datadog-mcp"
 
 [workspace.dependencies]
 # Async runtime (only features actually needed)
-tokio = { version = "1.50", features = ["rt-multi-thread", "macros", "fs"] }
-tokio-util = "0.7"
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "fs", "sync", "time"] }
 
 # HTTP client
-reqwest = { version = "0.13", features = ["json", "query", "rustls", "gzip"], default-features = false }
-reqwest-middleware = { version = "0.5", features = ["query"] }
-reqwest-retry = "0.9"
+reqwest = { version = "0.13.4", features = ["json", "query", "rustls", "gzip", "stream"], default-features = false }
+futures-util = "0.3.34"
 
 # Serialization
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
 
 # Error handling
-anyhow = "1.0"
-thiserror = "2.0"
+anyhow = "1.0.104"
+thiserror = "2.0.20"
 
 # Utilities
-uuid = { version = "1.23", features = ["v4", "serde"] }
-chrono = { version = "0.4", features = ["serde"] }
-dotenv = "0.15"
+uuid = { version = "1.26.0", features = ["v4"] }
+chrono = "0.4.45"
+dotenvy = "0.15.7"
 
 # Logging
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 
 # Text processing
-regex = "1.12"
+regex = "1.13.1"
 
 # Memory safety
-zeroize = { version = "1.8", features = ["derive"] }
+zeroize = { version = "1.9.0", features = ["derive"] }
 
 # Secure storage (platform keyrings)
-keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "sync-secret-service"] }
-
-# JSON-RPC
-async-trait = "0.1"
+keyring = "4.1.6"

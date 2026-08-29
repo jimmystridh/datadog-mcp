@@ -1,6 +1,7 @@
 //! Metrics tools
 
 use crate::state::ToolContext;
+use datadog_api::{models::MetricsListResponse, TimestampSecs};
 use serde_json::{json, Value};
 use tracing::info;
 
@@ -10,7 +11,7 @@ pub async fn get_metrics(
     from_timestamp: i64,
     to_timestamp: i64,
 ) -> anyhow::Result<Value> {
-    info!("Querying metrics: {}", query);
+    info!(query_length = query.len(), "Querying metrics");
 
     let api = ctx.metrics_api();
     let result = api
@@ -23,32 +24,26 @@ pub async fn get_metrics(
         ctx,
         data,
         {
-            let series_count = data.series.as_ref().map(|s| s.len()).unwrap_or(0);
-            let total_points: usize = data
-                .series
+            let series_count = data
+                .data
                 .as_ref()
-                .map(|s| {
-                    s.iter()
-                        .map(|series| series.pointlist.as_ref().map(|p| p.len()).unwrap_or(0))
-                        .sum()
-                })
-                .unwrap_or(0);
+                .map_or(0, |value| value.attributes.series.len());
+            let total_points: usize = data.data.as_ref().map_or(0, |value| {
+                value.attributes.values.iter().map(Vec::len).sum()
+            });
             format!(
                 "Retrieved {} metric series with {} data points",
                 series_count, total_points
             )
         },
         {
-            let series_count = data.series.as_ref().map(|s| s.len()).unwrap_or(0);
-            let total_points: usize = data
-                .series
+            let series_count = data
+                .data
                 .as_ref()
-                .map(|s| {
-                    s.iter()
-                        .map(|series| series.pointlist.as_ref().map(|p| p.len()).unwrap_or(0))
-                        .sum()
-                })
-                .unwrap_or(0);
+                .map_or(0, |value| value.attributes.series.len());
+            let total_points: usize = data.data.as_ref().map_or(0, |value| {
+                value.attributes.values.iter().map(Vec::len).sum()
+            });
 
             json!({
                 "series_count": series_count,
@@ -60,11 +55,27 @@ pub async fn get_metrics(
     )
 }
 
-pub async fn search_metrics(ctx: ToolContext, query: String) -> anyhow::Result<Value> {
+pub async fn search_metrics(
+    ctx: ToolContext,
+    query: String,
+    from_timestamp: Option<i64>,
+) -> anyhow::Result<Value> {
     info!("Searching metrics: {}", query);
 
+    let from_timestamp = from_timestamp.unwrap_or_else(|| TimestampSecs::now().0 - 86_400);
     let api = ctx.metrics_api();
-    let result = api.list_metrics(&query).await;
+    let result = api.list_active_metrics(from_timestamp).await.map(|data| {
+        let query = query.to_lowercase();
+        let metrics = data
+            .metrics
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|metric| metric.to_lowercase().contains(&query))
+            .collect();
+        MetricsListResponse {
+            metrics: Some(metrics),
+        }
+    });
 
     tool_response_with_fields!(
         result,
@@ -79,6 +90,7 @@ pub async fn search_metrics(ctx: ToolContext, query: String) -> anyhow::Result<V
             let metrics = data.metrics.clone().unwrap_or_default();
             let sample_metrics: Vec<_> = metrics.iter().take(10).cloned().collect();
             json!({
+                "from_timestamp": from_timestamp,
                 "metric_count": metrics.len(),
                 "sample_metrics": sample_metrics,
             })

@@ -1,10 +1,15 @@
 //! Monitor tools
 
+use crate::input_validation::{
+    validate_monitor_name, validate_monitor_query, validate_monitor_type,
+};
 use crate::response::{simple_success_with_fields, tool_error};
-use crate::sanitize::{sanitize_name, sanitize_optional, sanitize_query, MAX_MESSAGE_LENGTH, MAX_NAME_LENGTH, MAX_QUERY_LENGTH};
+use crate::sanitize::{
+    sanitize_name, sanitize_optional, sanitize_query, MAX_MESSAGE_LENGTH, MAX_NAME_LENGTH,
+    MAX_QUERY_LENGTH,
+};
 use crate::state::ToolContext;
 use crate::tool_inputs::{MonitorId, MonitorOptions};
-use crate::input_validation::{validate_monitor_name, validate_monitor_query, validate_monitor_type};
 use datadog_api::models::*;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -111,10 +116,19 @@ pub async fn get_monitor(ctx: ToolContext, monitor_id: MonitorId) -> anyhow::Res
             )
         },
         {
+            let status = data.overall_state.as_deref().map(|state| match state {
+                "Alert" => "alerting",
+                "Warn" => "warning",
+                "No Data" => "no_data",
+                "OK" => "ok",
+                "Ignored" => "ignored",
+                "Skipped" => "skipped",
+                _ => "unknown",
+            });
             json!({
                 "monitor_id": data.id,
                 "monitor_name": data.name,
-                "status": data.overall_state.clone().map(|s| if s == "Alert" { "alerting" } else { "ok" }),
+                "status": status,
                 "monitor_type": data.monitor_type,
             })
         }
@@ -127,6 +141,7 @@ pub async fn create_monitor(
     monitor_type: String,
     query: String,
     message: Option<String>,
+    tags: Option<Vec<String>>,
     options: Option<MonitorOptions>,
 ) -> anyhow::Result<Value> {
     let name = sanitize_name(&name);
@@ -151,7 +166,7 @@ pub async fn create_monitor(
         monitor_type: monitor_type.clone(),
         query: query.clone(),
         message,
-        tags: None,
+        tags,
         options: options.map(|opt| opt.into()),
     };
 
@@ -180,6 +195,7 @@ pub async fn update_monitor(
     name: Option<String>,
     query: Option<String>,
     message: Option<String>,
+    tags: Option<Vec<String>>,
     options: Option<MonitorOptions>,
 ) -> anyhow::Result<Value> {
     let name = sanitize_optional(name, MAX_NAME_LENGTH);
@@ -192,7 +208,7 @@ pub async fn update_monitor(
         name,
         query,
         message,
-        tags: None,
+        tags,
         options: options.map(|opt| opt.into()),
     };
 

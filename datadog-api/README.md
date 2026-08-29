@@ -2,32 +2,34 @@
 
 A Rust client library for the Datadog API with type-safe access to monitors, dashboards, metrics, logs, synthetics, and more.
 
+Requires Rust 1.88 or newer.
+
 [![Crates.io](https://img.shields.io/crates/v/datadog-api.svg)](https://crates.io/crates/datadog-api)
 [![Documentation](https://docs.rs/datadog-api/badge.svg)](https://docs.rs/datadog-api)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](../LICENSE)
 
 ## Features
 
-- **16 API modules** covering monitors, dashboards, metrics, logs, synthetics, events, infrastructure, downtimes, incidents, SLOs, security, notebooks, teams, users, and traces
-- **Automatic retry** with exponential backoff for transient failures
+- **16 API modules** covering monitors, dashboards, metrics, logs, synthetics, events, infrastructure, downtimes, incidents, SLOs, security, notebooks, teams, users, and APM spans/services
+- **Method-aware retry** for read-only requests with exponential jitter and Datadog rate-limit reset support; writes are not retried
 - **Rate limiting** with client-side token bucket
 - **Conditional requests** with ETag/If-Modified-Since support
 - **Type-safe timestamps** with `TimestampSecs`, `TimestampMillis`, `TimestampNanos`
 - **Secure credential storage** via system keyring (macOS Keychain, Windows Credential Manager, Secret Service)
-- **All Datadog regions** supported (US1, US3, US5, EU, AP1, US1-FED)
+- **All Datadog sites** supported (US1, US3, US5, EU, AP1, AP2, UK1, US1-FED, US2-FED)
 
 ## Installation
 
 ```toml
 [dependencies]
-datadog-api = "0.1"
+datadog-api = "0.2"
 ```
 
 To disable keyring support (for environments without a system keyring):
 
 ```toml
 [dependencies]
-datadog-api = { version = "0.1", default-features = false }
+datadog-api = { version = "0.2", default-features = false }
 ```
 
 ## Quick Start
@@ -88,6 +90,8 @@ let config = DatadogConfig::new(
     pool_max_idle_per_host: 10,
     pool_idle_timeout_secs: 90,
     tcp_keepalive_secs: Some(60),
+    total_timeout_secs: 90,
+    max_response_bytes: 10 * 1024 * 1024,
 });
 
 let client = DatadogClient::new(config)?;
@@ -97,9 +101,9 @@ let client = DatadogClient::new(config)?;
 
 The library loads credentials in this order:
 
-1. **Keyring** (if `keyring` feature enabled): System credential storage
-2. **File**: `~/.datadog-mcp/credentials.json`
-3. **Environment**: `DD_API_KEY`, `DD_APP_KEY`, `DD_SITE`
+1. **Environment**: `DD_API_KEY`, `DD_APP_KEY`, `DD_SITE`
+2. **Keyring** (if `keyring` feature enabled): System credential storage
+3. **File**: `~/.datadog-mcp/credentials.json` (mode `0600` required on Unix)
 
 ```rust
 // Try all sources
@@ -143,7 +147,7 @@ let users = UsersApi::new(client.clone());
 let notebooks = NotebooksApi::new(client.clone());
 
 // APM
-let traces = TracesApi::new(client.clone());
+let apm = TracesApi::new(client.clone());
 ```
 
 ## Error Handling
@@ -222,7 +226,10 @@ match response {
 | US5 | `us5.datadoghq.com` | US region 5 |
 | EU | `datadoghq.eu` | European Union |
 | AP1 | `ap1.datadoghq.com` | Asia Pacific |
+| AP2 | `ap2.datadoghq.com` | Australia |
+| UK1 | `uk1.datadoghq.com` | United Kingdom |
 | US1-FED | `ddog-gov.com` | US Government |
+| US2-FED | `us2.ddog-gov.com` | US Government |
 
 ## License
 

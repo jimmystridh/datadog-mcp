@@ -11,8 +11,14 @@ pub async fn search_logs(
     from_time: String,
     to_time: String,
     limit: Option<i32>,
+    cursor: Option<String>,
 ) -> anyhow::Result<Value> {
-    info!("Searching logs with query: {}", query);
+    info!(query_length = query.len(), "Searching logs");
+
+    let limit = limit.unwrap_or(100);
+    if !(1..=1000).contains(&limit) {
+        anyhow::bail!("Log search limit must be between 1 and 1000");
+    }
 
     let request = LogsSearchRequest {
         filter: LogsFilter {
@@ -21,8 +27,8 @@ pub async fn search_logs(
             to: to_time.clone(),
         },
         page: Some(LogsPage {
-            limit,
-            cursor: None,
+            limit: Some(limit),
+            cursor,
         }),
         sort: Some("timestamp".to_string()),
     };
@@ -43,6 +49,9 @@ pub async fn search_logs(
             let logs = data.data.as_ref().map(|l| l.len()).unwrap_or(0);
             json!({
                 "log_count": logs,
+                "next_cursor": data.meta.as_ref()
+                    .and_then(|meta| meta.page.as_ref())
+                    .and_then(|page| page.after.clone()),
                 "time_range": format!("{} to {}", from_time, to_time),
             })
         }

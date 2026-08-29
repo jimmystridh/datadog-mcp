@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Updated all Rust dependencies and GitHub Actions to their latest releases.
+- Migrated to RMCP 3.1 and its current MCP protocol negotiation, content model, and generated server metadata.
+- Migrated to keyring 4.1's default cross-platform credential store and removed native D-Bus build dependencies.
+- Replaced the unmaintained `dotenv` crate with the maintained `dotenvy` fork.
+- Declared Rust 1.88 as the minimum supported version and added a committed lockfile for reproducible application builds.
+- Bumped the workspace to 0.2.0 for corrected API contracts and safer MCP defaults.
+- Switched metric queries to `/api/v2/query/timeseries`, Teams to `/api/v2/team`, and Users to `/api/v2/users`.
+- Replaced unsupported trace endpoints with indexed span search plus current APM service and dependency endpoints.
+- Made the MCP server read-only by default; Datadog mutations now require `--allow-write`.
+
+### Improved
+
+- Reused RMCP's cached tool router and removed the redundant custom initialization handler.
+- Fixed active metric discovery by sending Datadog's required `from` timestamp and filtering metric names locally.
+- Accepted nullable metric units and empty scale factors returned by the Datadog timeseries API.
+- Compiled credential-redaction expressions once using Regex 1.13's `regex!` macro.
+- Marked authentication headers as sensitive and zeroized temporary credential payloads.
+- Removed unused direct dependencies and replaced Chrono usage with standard or project-native timestamp APIs where formatting was unnecessary.
+- Fixed tests that did not compile without the optional TOON feature and added minimal-feature validation to CI.
+- Added MCP structured content, inline bounded results, cursor/offset pagination, and correct `isError` tool results.
+- Made dashboard and Synthetics updates preserve fields unknown to this client.
+- Made response caching opt-in, excluded sensitive domains, confined cache reads, and added retention/size limits.
+- Added method-aware retries with jitter, rate-limit reset handling, total deadlines, and no automatic write retries.
+- Bounded decoded HTTP response bodies before JSON deserialization, with a configurable 10 MiB default.
+- Added dependency auditing, formatting, MSRV checks, Dependabot, tag/version release validation, and immutable GitHub Action pins.
+
 ## [0.1.0] - 2025-01-02
 
 ### Added

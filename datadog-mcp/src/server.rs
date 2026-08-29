@@ -4,19 +4,14 @@
 //! Tools are organized by domain but must remain in a single impl block
 //! due to rmcp's `#[tool_router]` macro requirements.
 
-use crate::errors::to_mcp_error;
 use crate::output::{Formattable, OutputFormat};
 use crate::state::ServerState;
 use crate::tool_inputs::*;
 use crate::tools;
 use rmcp::{
     handler::server::{tool::ToolRouter, wrapper::Parameters},
-    model::{
-        CallToolResult, Content, ErrorData, InitializeRequestParams, InitializeResult,
-        ProtocolVersion, ServerCapabilities, ServerInfo,
-    },
-    service::RequestContext,
-    tool, tool_handler, tool_router, RoleServer, ServerHandler,
+    model::{CallToolResult, ContentBlock, ErrorData, ToolAnnotations},
+    tool, tool_handler, tool_router, ServerHandler,
 };
 use serde::Serialize;
 use std::sync::Arc;
@@ -31,9 +26,42 @@ fn format_response<T: Serialize + Formattable>(data: &T, format: OutputFormat) -
 /// Handles the common pattern of: call tool function -> format response -> return success
 macro_rules! tool_call {
     ($self:ident, $func:expr) => {{
-        let result = $func.await.map_err(to_mcp_error)?;
+        let result = match $func.await {
+            Ok(result) => result,
+            Err(error) => {
+                tracing::error!(tool_error = %error, "Datadog MCP tool failed");
+                serde_json::json!({
+                    "status": "error",
+                    "error": error.to_string(),
+                })
+            }
+        };
         let text = format_response(&result, $self.state.output_format);
-        Ok(CallToolResult::success(vec![Content::text(text)]))
+        let is_error = result.get("status").and_then(|value| value.as_str()) == Some("error");
+        let mut response = if is_error {
+            CallToolResult::structured_error(result)
+        } else {
+            CallToolResult::structured(result)
+        };
+        response.content = vec![ContentBlock::text(text)];
+        Ok(response)
+    }};
+}
+
+macro_rules! write_tool_call {
+    ($self:ident, $name:literal, $func:expr) => {{
+        if !$self.state.allow_write {
+            let result = serde_json::json!({
+                "status": "error",
+                "error": format!(
+                    "{} is disabled because the server is running in read-only mode; restart with --allow-write to enable Datadog mutations",
+                    $name
+                ),
+            });
+            Ok(CallToolResult::structured_error(result))
+        } else {
+            tool_call!($self, $func)
+        }
     }};
 }
 
@@ -46,9 +74,55 @@ pub struct DatadogMcpServer {
 #[tool_router]
 impl DatadogMcpServer {
     pub fn new(state: ServerState) -> Self {
+        let mut tool_router = Self::tool_router();
+        for route in tool_router.map.values_mut() {
+            route.attr.annotations = Some(
+                ToolAnnotations::new()
+                    .read_only(true)
+                    .destructive(false)
+                    .idempotent(true)
+                    .open_world(true),
+            );
+        }
+
+        let write_tools = [
+            ("create_monitor", false, false),
+            ("update_monitor", true, true),
+            ("delete_monitor", true, true),
+            ("create_dashboard", false, false),
+            ("update_dashboard", true, true),
+            ("delete_dashboard", true, true),
+            ("create_event", false, false),
+            ("create_downtime", false, false),
+            ("cancel_downtime", true, true),
+            ("create_synthetics_test", false, false),
+            ("update_synthetics_test", true, true),
+            ("trigger_synthetics_tests", false, false),
+            ("delete_synthetics_tests", true, true),
+            ("cleanup_cache", true, true),
+        ];
+        for (name, destructive, idempotent) in write_tools {
+            if let Some(route) = tool_router.map.get_mut(name) {
+                route.attr.annotations = Some(
+                    ToolAnnotations::new()
+                        .read_only(false)
+                        .destructive(destructive)
+                        .idempotent(idempotent)
+                        .open_world(name != "cleanup_cache"),
+                );
+            }
+        }
+        for name in ["analyze_data", "cleanup_cache"] {
+            if let Some(route) = tool_router.map.get_mut(name) {
+                if let Some(annotations) = route.attr.annotations.as_mut() {
+                    annotations.open_world_hint = Some(false);
+                }
+            }
+        }
+
         Self {
             state: Arc::new(state),
-            tool_router: Self::tool_router(),
+            tool_router,
         }
     }
 
@@ -88,7 +162,7 @@ impl DatadogMcpServer {
     ) -> Result<CallToolResult, ErrorData> {
         tool_call!(
             self,
-            tools::search_metrics(self.state.tool_context(), input.query)
+            tools::search_metrics(self.state.tool_context(), input.query, input.from_timestamp,)
         )
     }
 
@@ -145,14 +219,16 @@ impl DatadogMcpServer {
         &self,
         Parameters(input): Parameters<CreateMonitorInput>,
     ) -> Result<CallToolResult, ErrorData> {
-        tool_call!(
+        write_tool_call!(
             self,
+            "create_monitor",
             tools::create_monitor(
                 self.state.tool_context(),
                 input.name,
                 input.monitor_type,
                 input.query,
                 input.message,
+                input.tags,
                 input.options,
             )
         )
@@ -163,14 +239,16 @@ impl DatadogMcpServer {
         &self,
         Parameters(input): Parameters<UpdateMonitorInput>,
     ) -> Result<CallToolResult, ErrorData> {
-        tool_call!(
+        write_tool_call!(
             self,
+            "update_monitor",
             tools::update_monitor(
                 self.state.tool_context(),
                 input.monitor_id,
                 input.name,
                 input.query,
                 input.message,
+                input.tags,
                 input.options,
             )
         )
@@ -181,8 +259,9 @@ impl DatadogMcpServer {
         &self,
         Parameters(input): Parameters<DeleteMonitorInput>,
     ) -> Result<CallToolResult, ErrorData> {
-        tool_call!(
+        write_tool_call!(
             self,
+            "delete_monitor",
             tools::delete_monitor(self.state.tool_context(), input.monitor_id)
         )
     }
@@ -212,8 +291,9 @@ impl DatadogMcpServer {
         &self,
         Parameters(input): Parameters<CreateDashboardInput>,
     ) -> Result<CallToolResult, ErrorData> {
-        tool_call!(
+        write_tool_call!(
             self,
+            "create_dashboard",
             tools::create_dashboard(
                 self.state.tool_context(),
                 input.title,
@@ -229,8 +309,9 @@ impl DatadogMcpServer {
         &self,
         Parameters(input): Parameters<UpdateDashboardInput>,
     ) -> Result<CallToolResult, ErrorData> {
-        tool_call!(
+        write_tool_call!(
             self,
+            "update_dashboard",
             tools::update_dashboard(
                 self.state.tool_context(),
                 input.dashboard_id,
@@ -245,8 +326,9 @@ impl DatadogMcpServer {
         &self,
         Parameters(input): Parameters<DeleteDashboardInput>,
     ) -> Result<CallToolResult, ErrorData> {
-        tool_call!(
+        write_tool_call!(
             self,
+            "delete_dashboard",
             tools::delete_dashboard(self.state.tool_context(), input.dashboard_id)
         )
     }
@@ -268,6 +350,7 @@ impl DatadogMcpServer {
                 input.from_time,
                 input.to_time,
                 input.limit,
+                input.cursor,
             )
         )
     }
@@ -294,8 +377,9 @@ impl DatadogMcpServer {
         &self,
         Parameters(input): Parameters<CreateEventInput>,
     ) -> Result<CallToolResult, ErrorData> {
-        tool_call!(
+        write_tool_call!(
             self,
+            "create_event",
             tools::create_event(
                 self.state.tool_context(),
                 input.title,
@@ -369,8 +453,9 @@ impl DatadogMcpServer {
         &self,
         Parameters(input): Parameters<CreateDowntimeInput>,
     ) -> Result<CallToolResult, ErrorData> {
-        tool_call!(
+        write_tool_call!(
             self,
+            "create_downtime",
             tools::create_downtime(
                 self.state.tool_context(),
                 input.scope,
@@ -386,8 +471,9 @@ impl DatadogMcpServer {
         &self,
         Parameters(input): Parameters<CancelDowntimeInput>,
     ) -> Result<CallToolResult, ErrorData> {
-        tool_call!(
+        write_tool_call!(
             self,
+            "cancel_downtime",
             tools::cancel_downtime(self.state.tool_context(), input.downtime_id)
         )
     }
@@ -414,8 +500,9 @@ impl DatadogMcpServer {
         &self,
         Parameters(input): Parameters<CreateSyntheticsTestInput>,
     ) -> Result<CallToolResult, ErrorData> {
-        tool_call!(
+        write_tool_call!(
             self,
+            "create_synthetics_test",
             tools::create_synthetics_test(
                 self.state.tool_context(),
                 input.name,
@@ -434,8 +521,9 @@ impl DatadogMcpServer {
         &self,
         Parameters(input): Parameters<UpdateSyntheticsTestInput>,
     ) -> Result<CallToolResult, ErrorData> {
-        tool_call!(
+        write_tool_call!(
             self,
+            "update_synthetics_test",
             tools::update_synthetics_test(
                 self.state.tool_context(),
                 input.public_id,
@@ -454,8 +542,9 @@ impl DatadogMcpServer {
         &self,
         Parameters(input): Parameters<TriggerSyntheticsTestsInput>,
     ) -> Result<CallToolResult, ErrorData> {
-        tool_call!(
+        write_tool_call!(
             self,
+            "trigger_synthetics_tests",
             tools::trigger_synthetics_tests(self.state.tool_context(), input.test_ids)
         )
     }
@@ -465,8 +554,9 @@ impl DatadogMcpServer {
         &self,
         Parameters(input): Parameters<DeleteSyntheticsTestsInput>,
     ) -> Result<CallToolResult, ErrorData> {
-        tool_call!(
+        write_tool_call!(
             self,
+            "delete_synthetics_tests",
             tools::delete_synthetics_tests(
                 self.state.tool_context(),
                 input.test_ids,
@@ -491,7 +581,11 @@ impl DatadogMcpServer {
     ) -> Result<CallToolResult, ErrorData> {
         tool_call!(
             self,
-            tools::get_incidents(self.state.tool_context(), input.page_size)
+            tools::get_incidents(
+                self.state.tool_context(),
+                input.page_size,
+                input.page_offset,
+            )
         )
     }
 
@@ -514,13 +608,33 @@ impl DatadogMcpServer {
     // ============================================================================
 
     #[tool(description = "Get teams")]
-    pub async fn get_teams(&self) -> Result<CallToolResult, ErrorData> {
-        tool_call!(self, tools::get_teams(self.state.tool_context()))
+    pub async fn get_teams(
+        &self,
+        Parameters(input): Parameters<GetTeamsInput>,
+    ) -> Result<CallToolResult, ErrorData> {
+        tool_call!(
+            self,
+            tools::get_teams(
+                self.state.tool_context(),
+                input.page_number,
+                input.page_size,
+            )
+        )
     }
 
     #[tool(description = "Get users")]
-    pub async fn get_users(&self) -> Result<CallToolResult, ErrorData> {
-        tool_call!(self, tools::get_users(self.state.tool_context()))
+    pub async fn get_users(
+        &self,
+        Parameters(input): Parameters<GetUsersInput>,
+    ) -> Result<CallToolResult, ErrorData> {
+        tool_call!(
+            self,
+            tools::get_users(
+                self.state.tool_context(),
+                input.page_number,
+                input.page_size,
+            )
+        )
     }
 
     // ============================================================================
@@ -534,7 +648,11 @@ impl DatadogMcpServer {
     ) -> Result<CallToolResult, ErrorData> {
         tool_call!(
             self,
-            tools::analyze_data(input.filepath, input.analysis_type)
+            tools::analyze_data(
+                self.state.tool_context(),
+                input.filepath,
+                input.analysis_type
+            )
         )
     }
 
@@ -543,7 +661,11 @@ impl DatadogMcpServer {
         &self,
         Parameters(input): Parameters<CleanupCacheInput>,
     ) -> Result<CallToolResult, ErrorData> {
-        tool_call!(self, tools::cleanup_cache_tool(input.older_than_hours))
+        write_tool_call!(
+            self,
+            "cleanup_cache",
+            tools::cleanup_cache_tool(self.state.tool_context(), input.older_than_hours)
+        )
     }
 }
 
@@ -551,24 +673,87 @@ impl DatadogMcpServer {
 // SERVER HANDLER
 // ============================================================================
 
-#[tool_handler]
-impl ServerHandler for DatadogMcpServer {
-    fn get_info(&self) -> ServerInfo {
-        InitializeResult::new(ServerCapabilities::builder().enable_tools().build())
-            .with_protocol_version(ProtocolVersion::V_2024_11_05)
-            .with_instructions(
-                "This server provides comprehensive access to Datadog's monitoring and \
-                 observability platform. Use the available tools to query metrics, manage \
-                 monitors and dashboards, search logs, retrieve infrastructure information, \
-                 manage incidents, and more.",
-            )
+#[tool_handler(
+    router = self.tool_router,
+    name = "datadog-mcp",
+    instructions = "This server provides comprehensive access to Datadog's monitoring and observability platform. Use the available tools to query metrics, manage monitors and dashboards, search logs, retrieve infrastructure information, manage incidents, and more."
+)]
+impl ServerHandler for DatadogMcpServer {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::output::OutputFormat;
+    use datadog_api::DatadogConfig;
+    use rmcp::model::ProtocolVersion;
+    use wiremock::{
+        matchers::{method, path},
+        Mock, MockServer, ResponseTemplate,
+    };
+
+    #[tokio::test]
+    async fn server_info_uses_current_package_and_protocol() {
+        let config = DatadogConfig::new("api-key".into(), "app-key".into());
+        let state = ServerState::new(config, OutputFormat::Json).await.unwrap();
+        let server = DatadogMcpServer::new(state);
+
+        let info = server.get_info();
+
+        assert_eq!(info.server_info.name, "datadog-mcp");
+        assert_eq!(info.server_info.version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(info.protocol_version, ProtocolVersion::LATEST);
+        assert!(info.capabilities.tools.is_some());
+        assert!(info.instructions.is_some());
+        assert!(server.tool_router.list_all().len() >= 35);
     }
 
-    async fn initialize(
-        &self,
-        _request: InitializeRequestParams,
-        _context: RequestContext<RoleServer>,
-    ) -> Result<InitializeResult, ErrorData> {
-        Ok(self.get_info())
+    #[tokio::test]
+    async fn write_tools_are_annotated_and_blocked_by_default() {
+        let config = DatadogConfig::new("api-key".into(), "app-key".into());
+        let state = ServerState::new(config, OutputFormat::Json).await.unwrap();
+        let server = DatadogMcpServer::new(state);
+
+        let tool = server.tool_router.get("create_monitor").unwrap();
+        let annotations = tool.annotations.as_ref().unwrap();
+        assert_eq!(annotations.read_only_hint, Some(false));
+        assert_eq!(annotations.destructive_hint, Some(false));
+
+        let result = server
+            .create_monitor(Parameters(CreateMonitorInput {
+                name: "Blocked".to_string(),
+                monitor_type: "metric alert".to_string(),
+                query: "avg(last_5m):avg:system.cpu.user{*} > 90".to_string(),
+                message: None,
+                tags: None,
+                options: None,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(true));
+        assert_eq!(result.structured_content.unwrap()["status"], "error");
+    }
+
+    #[tokio::test]
+    async fn datadog_api_failures_are_tool_errors() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/monitor/42"))
+            .respond_with(ResponseTemplate::new(404).set_body_string("not found"))
+            .mount(&mock_server)
+            .await;
+
+        let config =
+            DatadogConfig::new("api-key".into(), "app-key".into()).with_base_url(mock_server.uri());
+        let state = ServerState::new(config, OutputFormat::Json).await.unwrap();
+        let server = DatadogMcpServer::new(state);
+        let result = server
+            .get_monitor(Parameters(GetMonitorInput {
+                monitor_id: crate::ids::MonitorId(42),
+            }))
+            .await
+            .unwrap();
+
+        assert_eq!(result.is_error, Some(true));
+        assert_eq!(result.structured_content.unwrap()["status"], "error");
     }
 }

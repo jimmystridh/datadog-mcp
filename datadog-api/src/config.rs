@@ -3,7 +3,7 @@ use keyring::Entry;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::PathBuf;
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 /// Retry configuration for API requests.
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -40,6 +40,15 @@ pub struct HttpConfig {
     pub pool_idle_timeout_secs: u64,
     /// Enable TCP keepalive with given interval in seconds (default: Some(60))
     pub tcp_keepalive_secs: Option<u64>,
+    /// Overall deadline across all retry attempts (default: 90)
+    pub total_timeout_secs: u64,
+    /// Maximum decoded response body size in bytes (default: 10 MiB)
+    #[serde(default = "default_max_response_bytes")]
+    pub max_response_bytes: usize,
+}
+
+const fn default_max_response_bytes() -> usize {
+    10 * 1024 * 1024
 }
 
 impl Default for HttpConfig {
@@ -49,12 +58,14 @@ impl Default for HttpConfig {
             pool_max_idle_per_host: 10,
             pool_idle_timeout_secs: 90,
             tcp_keepalive_secs: Some(60),
+            total_timeout_secs: 90,
+            max_response_bytes: default_max_response_bytes(),
         }
     }
 }
 
 /// Datadog API configuration containing credentials and regional settings.
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize)]
 pub struct DatadogConfig {
     /// Datadog API key for authentication
     pub api_key: SecretString,
@@ -97,6 +108,19 @@ impl fmt::Debug for DatadogConfig {
 const fn default_site_const() -> &'static str {
     "datadoghq.com"
 }
+
+/// Datadog sites supported by the public API.
+pub const SUPPORTED_SITES: &[&str] = &[
+    "datadoghq.com",
+    "us3.datadoghq.com",
+    "us5.datadoghq.com",
+    "datadoghq.eu",
+    "ap1.datadoghq.com",
+    "ap2.datadoghq.com",
+    "uk1.datadoghq.com",
+    "ddog-gov.com",
+    "us2.ddog-gov.com",
+];
 
 fn default_site() -> String {
     default_site_const().to_string()
@@ -152,6 +176,38 @@ impl DatadogConfig {
             .unwrap_or_else(|| format!("https://api.{}", self.site))
     }
 
+    /// Validate the configured Datadog site before making network requests.
+    pub fn validate_site(&self) -> crate::Result<()> {
+        if let Some(base_url) = &self.base_url_override {
+            let url = reqwest::Url::parse(base_url).map_err(|error| {
+                crate::Error::ConfigError(format!("Invalid base URL override: {error}"))
+            })?;
+            let is_loopback = url.host_str().is_some_and(|host| {
+                host.eq_ignore_ascii_case("localhost")
+                    || host
+                        .parse::<std::net::IpAddr>()
+                        .is_ok_and(|address| address.is_loopback())
+            });
+            if url.scheme() == "https" || (url.scheme() == "http" && is_loopback) {
+                return Ok(());
+            }
+            return Err(crate::Error::ConfigError(
+                "Base URL overrides must use HTTPS; HTTP is allowed only for loopback test servers"
+                    .to_string(),
+            ));
+        }
+
+        if SUPPORTED_SITES.contains(&self.site.as_str()) {
+            return Ok(());
+        }
+
+        Err(crate::Error::ConfigError(format!(
+            "Unsupported DD_SITE '{}'. Supported sites: {}",
+            self.site,
+            SUPPORTED_SITES.join(", ")
+        )))
+    }
+
     /// Creates a configuration from environment variables.
     ///
     /// # Environment Variables
@@ -172,7 +228,7 @@ impl DatadogConfig {
 
         let site = std::env::var("DD_SITE").unwrap_or_else(|_| default_site());
 
-        Ok(Self {
+        let config = Self {
             api_key: SecretString::new(api_key),
             app_key: SecretString::new(application_key),
             site,
@@ -180,19 +236,34 @@ impl DatadogConfig {
             http_config: HttpConfig::default(),
             unstable_operations: default_unstable_operations(),
             base_url_override: None,
-        })
+        };
+        config.validate_site()?;
+        Ok(config)
     }
 
-    /// Attempt to load credentials from ~/.datadog-mcp/credentials.json, falling back to env vars.
+    /// Load credentials using explicit precedence: environment, keyring, then file.
+    ///
+    /// If either credential environment variable is present, environment loading is
+    /// attempted and partial configuration is reported instead of silently falling back.
     pub fn from_env_or_file() -> crate::Result<Self> {
-        if let Ok(file_cfg) = Self::from_credentials_file() {
-            return Ok(file_cfg);
+        if std::env::var_os("DD_API_KEY").is_some() || std::env::var_os("DD_APP_KEY").is_some() {
+            return Self::from_env();
         }
         #[cfg(feature = "keyring")]
-        if let Ok(keyring_cfg) = Self::from_keyring() {
+        if let Some(keyring_cfg) = Self::from_keyring_optional()? {
             return Ok(keyring_cfg);
         }
-        Self::from_env()
+        Self::from_credentials_file()
+    }
+
+    /// Load credentials from environment or the credentials file, without consulting keyring.
+    ///
+    /// This is intended for one-time keyring enrollment commands.
+    pub fn from_env_or_credentials_file() -> crate::Result<Self> {
+        if std::env::var_os("DD_API_KEY").is_some() || std::env::var_os("DD_APP_KEY").is_some() {
+            return Self::from_env();
+        }
+        Self::from_credentials_file()
     }
 
     fn from_credentials_file() -> crate::Result<Self> {
@@ -202,18 +273,43 @@ impl DatadogConfig {
         let path = PathBuf::from(home)
             .join(".datadog-mcp")
             .join("credentials.json");
-        let content = std::fs::read_to_string(&path).map_err(|e| {
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path)
+                .map_err(|e| {
+                    crate::Error::ConfigError(format!(
+                        "Failed to inspect {}: {}",
+                        path.display(),
+                        e
+                    ))
+                })?
+                .permissions()
+                .mode()
+                & 0o777;
+            if mode & 0o077 != 0 {
+                return Err(crate::Error::ConfigError(format!(
+                    "Credentials file {} must not be accessible by group or others (use chmod 600)",
+                    path.display()
+                )));
+            }
+        }
+
+        let content = Zeroizing::new(std::fs::read_to_string(&path).map_err(|e| {
             crate::Error::ConfigError(format!("Failed to read {}: {}", path.display(), e))
-        })?;
-        let file_cfg: FileCredentials = serde_json::from_str(&content).map_err(|e| {
+        })?);
+        let file_cfg: FileCredentials = serde_json::from_str(content.as_str()).map_err(|e| {
             crate::Error::ConfigError(format!(
                 "Invalid credentials file {}: {}",
                 path.display(),
                 e
             ))
         })?;
-        Ok(Self::new(file_cfg.api_key, file_cfg.app_key)
-            .with_site(file_cfg.site.unwrap_or_else(default_site)))
+        let config = Self::new(file_cfg.api_key, file_cfg.app_key)
+            .with_site(file_cfg.site.unwrap_or_else(default_site));
+        config.validate_site()?;
+        Ok(config)
     }
 
     /// Load configuration from the system keyring entry, if present.
@@ -221,17 +317,33 @@ impl DatadogConfig {
     /// Profile defaults to `DD_PROFILE` or `default`.
     #[cfg(feature = "keyring")]
     pub fn from_keyring() -> crate::Result<Self> {
+        Self::from_keyring_optional()?.ok_or_else(|| {
+            crate::Error::ConfigError("No credentials found in the system keyring".to_string())
+        })
+    }
+
+    #[cfg(feature = "keyring")]
+    fn from_keyring_optional() -> crate::Result<Option<Self>> {
         let profile = std::env::var("DD_PROFILE").unwrap_or_else(|_| "default".to_string());
         let entry = Entry::new(KEYRING_SERVICE, &profile)
             .map_err(|e| crate::Error::ConfigError(format!("Failed to access keyring: {e}")))?;
-        let secret = entry
-            .get_password()
-            .map_err(|e| crate::Error::ConfigError(format!("Failed to read keyring entry: {e}")))?;
-        let creds: FileCredentials = serde_json::from_str(&secret).map_err(|e| {
+        let password = match entry.get_password() {
+            Ok(password) => password,
+            Err(keyring::Error::NoEntry) => return Ok(None),
+            Err(error) => {
+                return Err(crate::Error::ConfigError(format!(
+                    "Failed to read keyring entry: {error}"
+                )))
+            }
+        };
+        let secret = Zeroizing::new(password);
+        let creds: FileCredentials = serde_json::from_str(secret.as_str()).map_err(|e| {
             crate::Error::ConfigError(format!("Invalid keyring credentials format: {e}"))
         })?;
-        Ok(Self::new(creds.api_key, creds.app_key)
-            .with_site(creds.site.unwrap_or_else(default_site)))
+        let config = Self::new(creds.api_key, creds.app_key)
+            .with_site(creds.site.unwrap_or_else(default_site));
+        config.validate_site()?;
+        Ok(Some(config))
     }
 
     /// Store the current configuration in the system keyring entry.
@@ -242,13 +354,17 @@ impl DatadogConfig {
         let profile = std::env::var("DD_PROFILE").unwrap_or_else(|_| "default".to_string());
         let entry = Entry::new(KEYRING_SERVICE, &profile)
             .map_err(|e| crate::Error::ConfigError(format!("Failed to access keyring: {e}")))?;
-        let payload = serde_json::to_string(&FileCredentials {
-            api_key: self.api_key.expose().to_string(),
-            app_key: self.app_key.expose().to_string(),
-            site: Some(self.site.clone()),
-        })
-        .map_err(|e| crate::Error::ConfigError(format!("Failed to serialize credentials: {e}")))?;
-        entry.set_password(&payload).map_err(|e| {
+        let payload = Zeroizing::new(
+            serde_json::to_string(&KeyringCredentials {
+                api_key: self.api_key.expose(),
+                app_key: self.app_key.expose(),
+                site: &self.site,
+            })
+            .map_err(|e| {
+                crate::Error::ConfigError(format!("Failed to serialize credentials: {e}"))
+            })?,
+        );
+        entry.set_password(payload.as_str()).map_err(|e| {
             crate::Error::ConfigError(format!("Failed to store keyring entry: {e}"))
         })?;
         Ok(())
@@ -256,7 +372,7 @@ impl DatadogConfig {
 }
 
 /// Wrapper for secrets that zeroize on drop and redact debug output.
-#[derive(Clone, Deserialize, Serialize, Zeroize, ZeroizeOnDrop, PartialEq, Eq)]
+#[derive(Clone, Deserialize, Zeroize, ZeroizeOnDrop, PartialEq, Eq)]
 #[serde(transparent)]
 pub struct SecretString(String);
 
@@ -300,7 +416,7 @@ impl PartialEq<&str> for SecretString {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Deserialize)]
 struct FileCredentials {
     api_key: String,
     app_key: String,
@@ -309,14 +425,28 @@ struct FileCredentials {
 }
 
 #[cfg(feature = "keyring")]
+#[derive(Serialize)]
+struct KeyringCredentials<'a> {
+    api_key: &'a str,
+    app_key: &'a str,
+    site: &'a str,
+}
+
+#[cfg(feature = "keyring")]
 const KEYRING_SERVICE: &str = "datadog-mcp";
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Error;
-    use serial_test::serial;
+    use crate::{DatadogClient, Error};
     use std::env;
+    use std::sync::{Mutex, MutexGuard, PoisonError};
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn lock_env() -> MutexGuard<'static, ()> {
+        ENV_LOCK.lock().unwrap_or_else(PoisonError::into_inner)
+    }
 
     #[test]
     fn test_config_new() {
@@ -336,6 +466,41 @@ mod tests {
     }
 
     #[test]
+    fn test_supported_sites_validate() {
+        for site in SUPPORTED_SITES {
+            let config = DatadogConfig::new("api".to_string(), "app".to_string())
+                .with_site((*site).to_string());
+            assert!(
+                config.validate_site().is_ok(),
+                "site {site} should validate"
+            );
+        }
+    }
+
+    #[test]
+    fn test_unknown_site_is_rejected() {
+        let config = DatadogConfig::new("api".to_string(), "app".to_string())
+            .with_site("attacker.example".to_string());
+        assert!(config.validate_site().is_err());
+        assert!(DatadogClient::new(config).is_err());
+    }
+
+    #[test]
+    fn test_base_url_override_rejects_remote_plaintext_http() {
+        let config = DatadogConfig::new("api".to_string(), "app".to_string())
+            .with_base_url("http://attacker.example".to_string());
+        assert!(config.validate_site().is_err());
+        assert!(DatadogClient::new(config).is_err());
+    }
+
+    #[test]
+    fn test_base_url_override_allows_loopback_http() {
+        let config = DatadogConfig::new("api".to_string(), "app".to_string())
+            .with_base_url("http://127.0.0.1:8080".to_string());
+        assert!(config.validate_site().is_ok());
+    }
+
+    #[test]
     fn test_base_url_us1() {
         let config = DatadogConfig::new("test_api_key".to_string(), "test_app_key".to_string());
 
@@ -351,8 +516,8 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_from_env_success() {
+        let _env_guard = lock_env();
         env::set_var("DD_API_KEY", "env_api_key");
         env::set_var("DD_APP_KEY", "env_app_key");
         env::set_var("DD_SITE", "us3.datadoghq.com");
@@ -369,8 +534,8 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_from_env_default_site() {
+        let _env_guard = lock_env();
         env::set_var("DD_API_KEY", "env_api_key");
         env::set_var("DD_APP_KEY", "env_app_key");
         env::remove_var("DD_SITE");
@@ -384,8 +549,8 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_from_env_missing_api_key() {
+        let _env_guard = lock_env();
         env::remove_var("DD_API_KEY");
         env::set_var("DD_APP_KEY", "env_app_key");
 
@@ -402,8 +567,8 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_from_env_missing_app_key() {
+        let _env_guard = lock_env();
         env::set_var("DD_API_KEY", "env_api_key");
         env::remove_var("DD_APP_KEY");
 
@@ -420,17 +585,10 @@ mod tests {
     }
 
     #[test]
-    fn test_config_serialization() {
-        let config = DatadogConfig::new("api_key".to_string(), "app_key".to_string())
-            .with_site("datadoghq.eu".to_string());
-
-        let json = serde_json::to_string(&config).expect("Failed to serialize");
-        let deserialized: DatadogConfig =
-            serde_json::from_str(&json).expect("Failed to deserialize");
-
-        assert_eq!(config.api_key, deserialized.api_key);
-        assert_eq!(config.app_key, deserialized.app_key);
-        assert_eq!(config.site, deserialized.site);
+    fn test_secret_debug_is_redacted() {
+        let secret = SecretString::new("api_key");
+        assert_eq!(format!("{secret:?}"), "[REDACTED]");
+        assert_eq!(format!("{secret}"), "[REDACTED]");
     }
 
     #[test]
@@ -440,6 +598,8 @@ mod tests {
         assert_eq!(config.pool_max_idle_per_host, 10);
         assert_eq!(config.pool_idle_timeout_secs, 90);
         assert_eq!(config.tcp_keepalive_secs, Some(60));
+        assert_eq!(config.total_timeout_secs, 90);
+        assert_eq!(config.max_response_bytes, 10 * 1024 * 1024);
     }
 
     #[test]
@@ -449,11 +609,12 @@ mod tests {
             pool_max_idle_per_host: 20,
             pool_idle_timeout_secs: 120,
             tcp_keepalive_secs: None,
+            total_timeout_secs: 180,
+            max_response_bytes: 20 * 1024 * 1024,
         };
 
         let json = serde_json::to_string(&config).expect("Failed to serialize");
-        let deserialized: HttpConfig =
-            serde_json::from_str(&json).expect("Failed to deserialize");
+        let deserialized: HttpConfig = serde_json::from_str(&json).expect("Failed to deserialize");
 
         assert_eq!(config.timeout_secs, deserialized.timeout_secs);
         assert_eq!(
@@ -461,5 +622,6 @@ mod tests {
             deserialized.pool_max_idle_per_host
         );
         assert_eq!(config.tcp_keepalive_secs, deserialized.tcp_keepalive_secs);
+        assert_eq!(config.max_response_bytes, deserialized.max_response_bytes);
     }
 }

@@ -4,25 +4,15 @@
 //! Runs over stdio and provides access to monitors, dashboards, metrics, logs,
 //! synthetics, and more through the MCP protocol.
 
-pub mod cache;
-mod errors;
-mod ids;
-mod input_validation;
-mod output;
-#[macro_use]
-pub mod response;
-mod sanitize;
-mod server;
-mod state;
-mod tool_inputs;
-mod tools;
-
 use anyhow::Result;
 use clap::Parser;
-use output::OutputFormat;
+use datadog_mcp::{
+    cache,
+    output::OutputFormat,
+    server::DatadogMcpServer,
+    state::{ServerOptions, ServerState},
+};
 use rmcp::{transport::stdio, ServiceExt};
-use server::DatadogMcpServer;
-use state::ServerState;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
@@ -39,6 +29,22 @@ struct Args {
     #[cfg(feature = "keyring")]
     #[arg(long)]
     store_credentials: bool,
+
+    /// Allow tools that create, update, delete, trigger, or cancel Datadog resources
+    #[arg(long)]
+    allow_write: bool,
+
+    /// Persist non-sensitive tool responses to the local cache
+    #[arg(long)]
+    cache_responses: bool,
+
+    /// Delete cached responses older than this many hours at startup
+    #[arg(long, default_value_t = 24)]
+    cache_retention_hours: u64,
+
+    /// Maximum response-cache size in MiB; oldest files are removed first
+    #[arg(long, default_value_t = 100)]
+    cache_max_mib: u64,
 }
 
 fn parse_format(s: &str) -> Result<OutputFormat, String> {
@@ -59,7 +65,7 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     // Load environment variables from .env file without overriding existing variables
-    let _ = dotenv::dotenv();
+    let _ = dotenvy::dotenv();
 
     // Initialize tracing to stderr (stdout is reserved for MCP protocol)
     tracing_subscriber::fmt()
@@ -71,23 +77,53 @@ async fn main() -> Result<()> {
     info!("Starting Datadog MCP Server");
     info!("Output format: {:?}", args.format);
 
-    // Initialize cache
-    cache::init_cache().await?;
-
-    // Load Datadog configuration
-    let config = datadog_api::config::DatadogConfig::from_env_or_file()?;
-
     // If requested, store credentials in keyring and exit
     #[cfg(feature = "keyring")]
     if args.store_credentials {
+        let config = datadog_api::config::DatadogConfig::from_env_or_credentials_file()?;
         config.store_in_keyring()?;
         info!("Stored Datadog credentials in keyring");
         return Ok(());
     }
+
+    // Load Datadog configuration
+    let config = datadog_api::config::DatadogConfig::from_env_or_file()?;
     info!("Loaded Datadog configuration for site: {}", config.site);
 
+    let cache_dir = cache::default_cache_dir();
+    if args.cache_responses {
+        cache::init_cache_in(&cache_dir).await?;
+        let deleted = cache::cleanup_cache_in(&cache_dir, args.cache_retention_hours).await?;
+        let size_deleted = cache::enforce_cache_size_in(
+            &cache_dir,
+            args.cache_max_mib.saturating_mul(1024 * 1024),
+        )
+        .await?;
+        info!(
+            cache_directory = %cache_dir.display(),
+            retention_deleted = deleted,
+            size_deleted,
+            "Response cache enabled and retention applied"
+        );
+    }
+    info!(
+        allow_write = args.allow_write,
+        cache_responses = args.cache_responses,
+        "Safety mode configured"
+    );
+
     // Initialize server state with output format
-    let state = ServerState::new(config, args.format).await?;
+    let state = ServerState::new_with_options(
+        config,
+        args.format,
+        ServerOptions {
+            allow_write: args.allow_write,
+            cache_responses: args.cache_responses,
+            cache_dir,
+            cache_max_bytes: args.cache_max_mib.saturating_mul(1024 * 1024),
+        },
+    )
+    .await?;
     info!("Server state initialized");
 
     // Test connection to Datadog

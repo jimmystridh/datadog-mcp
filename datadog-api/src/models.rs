@@ -196,12 +196,43 @@ pub struct MetricsQueryResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TimeseriesFormulaQueryResponse {
+    pub data: Option<TimeseriesFormulaResponseData>,
+    pub errors: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TimeseriesFormulaResponseData {
+    pub attributes: TimeseriesFormulaResponseAttributes,
+    #[serde(rename = "type")]
+    pub resource_type: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TimeseriesFormulaResponseAttributes {
+    #[serde(default)]
+    pub series: Vec<TimeseriesFormulaResponseSeries>,
+    #[serde(default)]
+    pub times: Vec<i64>,
+    #[serde(default)]
+    pub values: Vec<Vec<Option<f64>>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TimeseriesFormulaResponseSeries {
+    #[serde(default)]
+    pub group_tags: Vec<String>,
+    pub query_index: Option<i32>,
+    pub unit: Option<Vec<Option<MetricUnit>>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MetricSeries {
     pub metric: Option<String>,
     pub pointlist: Option<Vec<Vec<serde_json::Value>>>,
     pub scope: Option<String>,
     pub display_name: Option<String>,
-    pub unit: Option<Vec<MetricUnit>>,
+    pub unit: Option<Vec<Option<MetricUnit>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -209,8 +240,27 @@ pub struct MetricUnit {
     pub family: Option<String>,
     pub name: Option<String>,
     pub plural: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_f64")]
     pub scale_factor: Option<f64>,
     pub short_name: Option<String>,
+}
+
+fn deserialize_optional_f64<'de, D>(deserializer: D) -> Result<Option<f64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    match value {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::Number(number)) => number
+            .as_f64()
+            .ok_or_else(|| serde::de::Error::custom("scale factor is not representable as f64"))
+            .map(Some),
+        Some(serde_json::Value::String(value)) if value.is_empty() => Ok(None),
+        Some(value) => Err(serde::de::Error::custom(format!(
+            "invalid scale factor: {value}"
+        ))),
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -251,8 +301,12 @@ pub struct MonitorOptions {
     pub thresholds: Option<MonitorThresholds>,
     pub notify_no_data: Option<bool>,
     pub no_data_timeframe: Option<i64>,
+    pub evaluation_delay: Option<i64>,
     pub renotify_interval: Option<i64>,
     pub escalation_message: Option<String>,
+    pub include_tags: Option<bool>,
+    pub require_full_window: Option<bool>,
+    pub new_group_delay: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -853,150 +907,70 @@ pub struct User {
     pub verified: Option<bool>,
 }
 
-// APM/Traces
-/// A single span in a distributed trace
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Span {
-    /// Span ID (unique identifier for this span)
-    pub span_id: u64,
-    /// Trace ID (shared across all spans in the trace)
-    pub trace_id: u64,
-    /// Parent span ID (0 if root span)
-    #[serde(default)]
-    pub parent_id: u64,
-    /// Service name
-    pub service: String,
-    /// Resource name (e.g., endpoint, SQL query)
-    pub resource: String,
-    /// Operation name (e.g., "web.request", "db.query")
-    pub name: String,
-    /// Start timestamp (nanoseconds since epoch)
-    pub start: i64,
-    /// Duration in nanoseconds
-    pub duration: i64,
-    /// Error flag (0 = no error, 1 = error)
-    #[serde(default)]
-    pub error: i32,
-    /// Key-value metadata
-    #[serde(default)]
-    pub meta: HashMap<String, String>,
-    /// Numeric metadata
-    #[serde(default)]
-    pub metrics: HashMap<String, f64>,
-    /// Span type (web, db, cache, etc.)
-    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
-    pub span_type: Option<String>,
+pub struct UsersV2Response {
+    pub data: Option<Vec<UserV2>>,
+    pub meta: Option<JsonValue>,
 }
 
-/// Request to submit traces
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TraceSubmitRequest {
-    /// Array of traces (each trace is an array of spans)
-    pub traces: Vec<Vec<Span>>,
+pub struct UserV2 {
+    pub id: Option<String>,
+    pub attributes: Option<JsonValue>,
 }
 
-/// Response from trace submission
+// APM/Spans
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TraceSubmitResponse {
-    /// Status message
-    pub status: Option<String>,
+pub struct SpansSearchRequest {
+    pub data: SpansSearchData,
 }
 
-/// Query parameters for searching traces
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TraceQuery {
-    /// Service name filter
+pub struct SpansSearchData {
+    pub attributes: SpansSearchRequestAttributes,
+    #[serde(rename = "type")]
+    pub resource_type: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpansSearchRequestAttributes {
+    pub filter: SpansSearchFilter,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub service: Option<String>,
-    /// Operation name filter
+    pub page: Option<SpansSearchPage>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub operation: Option<String>,
-    /// Resource filter
+    pub sort: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpansSearchFilter {
+    pub from: String,
+    pub query: String,
+    pub to: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpansSearchPage {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub resource: Option<String>,
-    /// Start time (seconds since epoch)
-    pub start: i64,
-    /// End time (seconds since epoch)
-    pub end: i64,
-    /// Maximum number of results
+    pub cursor: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<i32>,
 }
 
-/// A single trace (collection of spans)
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Trace {
-    /// Trace ID
-    pub trace_id: String,
-    /// All spans in this trace
-    pub spans: Vec<Span>,
-    /// Start time
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub start: Option<i64>,
-    /// End time
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub end: Option<i64>,
+pub struct SpansSearchResponse {
+    pub data: Option<Vec<JsonValue>>,
+    pub links: Option<JsonValue>,
+    pub meta: Option<JsonValue>,
 }
 
-/// Response from trace search
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TraceSearchResponse {
-    /// Matching traces
-    pub data: Option<Vec<Trace>>,
-    /// Metadata about the search
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub meta: Option<HashMap<String, JsonValue>>,
+pub struct ApmServiceDependency {
+    pub calls: Vec<String>,
 }
 
-/// Service performance statistics
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServiceStats {
-    /// Service name
-    pub service: String,
-    /// Statistics by endpoint/resource
-    pub stats: Vec<ResourceStats>,
-}
+pub type ApmServiceDependenciesResponse = HashMap<String, ApmServiceDependency>;
 
-/// Statistics for a specific resource
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ResourceStats {
-    /// Resource name
-    pub resource: String,
-    /// Request count
-    pub hits: i64,
-    /// Error count
-    pub errors: i64,
-    /// Average duration (nanoseconds)
-    pub duration: f64,
-    /// P50 latency
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub p50: Option<f64>,
-    /// P95 latency
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub p95: Option<f64>,
-    /// P99 latency
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub p99: Option<f64>,
-}
-
-/// Service dependencies
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServiceDependencies {
-    /// Service name
-    pub service: String,
-    /// Calls made to other services
-    pub calls: Vec<ServiceCall>,
-}
-
-/// A call from one service to another
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServiceCall {
-    /// Target service name
-    pub service: String,
-    /// Call count
-    pub count: i64,
-    /// Average duration
-    pub avg_duration: f64,
-    /// Error rate
-    pub error_rate: f64,
+pub struct ServiceListResponse {
+    pub data: JsonValue,
 }

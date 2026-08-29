@@ -14,7 +14,7 @@ Legend:
 
 | Area | datadog-api crate | MCP tools | Notes |
 | --- | --- | --- | --- |
-| Metrics | Read-only | Read-only | Query/list/metadata only; no metric submission or metadata updates. |
+| Metrics | Read-only | Read-only | v2 timeseries query plus active list/metadata; no metric submission or metadata updates. |
 | Monitors | CRUD + search | CRUD + search |  |
 | Dashboards | CRUD | CRUD |  |
 | Logs | Search-only | Search-only | No indexes/pipelines/archives. |
@@ -24,12 +24,12 @@ Legend:
 | Downtimes | Partial (list/create/cancel) | Partial (list/create/cancel) | No update. |
 | Synthetics | Partial (list/get/locations/create/update/trigger/delete) | Partial | No results/history. |
 | Security Monitoring | Rules list-only | Rules list-only | No signals/findings. |
-| Incidents | List-only | List-only | MCP wraps list-all pagination. |
+| Incidents | List-only | List-only | Single bounded page with next offset returned. |
 | SLOs | List-only | List-only | No create/update/history. |
 | Notebooks | List-only | List-only |  |
-| Teams | List-only | List-only |  |
-| Users | List-only | List-only |  |
-| APM/Traces | Read/write (submit/search/get/stats/dependencies/services) | Not exposed | Crate only. |
+| Teams | List-only | List-only | Page number and size supported. |
+| Users | List-only | List-only | Current v2 endpoint with page number and size. |
+| APM/Spans | Search + service/dependency reads | Not exposed | Crate uses `/api/v2/spans/events/search`, `/api/v2/apm/services`, and `/api/v1/service_dependencies`; trace intake belongs on an Agent/OTLP pipeline. |
 
 ## MCP-Only Utilities
 

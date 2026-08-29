@@ -1,11 +1,10 @@
 //! Dashboard tools
 
 use crate::ids::DashboardId;
+use crate::input_validation::{validate_dashboard_layout, validate_dashboard_title};
 use crate::response::{simple_success_with_fields, tool_error};
 use crate::sanitize::{sanitize_name, sanitize_optional, MAX_MESSAGE_LENGTH, MAX_NAME_LENGTH};
 use crate::state::ToolContext;
-use crate::input_validation::{validate_dashboard_layout, validate_dashboard_title};
-use datadog_api::models::{Dashboard, Widget};
 use serde_json::{json, Value};
 use tracing::info;
 
@@ -51,20 +50,20 @@ pub async fn get_dashboard(ctx: ToolContext, dashboard_id: DashboardId) -> anyho
         ctx,
         data,
         {
-            let widgets = data.widgets.as_ref().map(|w| w.len()).unwrap_or(0);
+            let widgets = data["widgets"].as_array().map_or(0, Vec::len);
             format!(
-                "Dashboard: {:?} with {} widgets",
-                data.title.as_ref().unwrap_or(&"Untitled".to_string()),
+                "Dashboard: {} with {} widgets",
+                data["title"].as_str().unwrap_or("Untitled"),
                 widgets
             )
         },
         {
-            let widgets = data.widgets.as_ref().map(|w| w.len()).unwrap_or(0);
+            let widgets = data["widgets"].as_array().map_or(0, Vec::len);
             json!({
-                "dashboard_id": data.id,
-                "dashboard_title": data.title,
+                "dashboard_id": data["id"],
+                "dashboard_title": data["title"],
                 "widget_count": widgets,
-                "layout_type": data.layout_type,
+                "layout_type": data["layout_type"],
             })
         }
     )
@@ -88,24 +87,14 @@ pub async fn create_dashboard(
         return Ok(tool_error("create_dashboard", e));
     }
 
-    // Convert JSON widgets to typed widgets
-    let typed_widgets: Vec<Widget> = widgets
-        .into_iter()
-        .filter_map(|w| serde_json::from_value(w).ok())
-        .collect();
-
     info!("Creating dashboard: {}", title);
 
-    let dashboard = Dashboard {
-        id: None,
-        title: Some(title.clone()),
-        description,
-        widgets: Some(typed_widgets),
-        layout_type: Some(layout_type),
-        is_read_only: None,
-        notify_list: None,
-        template_variables: None,
-    };
+    let dashboard = json!({
+        "title": title,
+        "description": description,
+        "widgets": widgets,
+        "layout_type": layout_type,
+    });
 
     let api = ctx.dashboards_api();
     let result = api.create_dashboard(&dashboard).await;
@@ -115,11 +104,14 @@ pub async fn create_dashboard(
         "dashboard_created",
         ctx,
         data,
-        format!("Created dashboard: {:?} (ID: {:?})", data.title, data.id),
+        format!(
+            "Created dashboard: {}",
+            data["title"].as_str().unwrap_or("Untitled")
+        ),
         {
             json!({
-                "dashboard_id": data.id,
-                "dashboard_title": data.title,
+                "dashboard_id": data["id"],
+                "dashboard_title": data["title"],
                 "status": "created",
             })
         }
@@ -141,23 +133,21 @@ pub async fn update_dashboard(
     // Get existing dashboard first
     let existing = api.get_dashboard(&dashboard_id.0).await?;
 
-    // Convert JSON widgets to typed widgets if provided
-    let typed_widgets: Option<Vec<Widget>> = widgets.map(|w| {
-        w.into_iter()
-            .filter_map(|widget| serde_json::from_value(widget).ok())
-            .collect()
-    });
-
-    let updated_dashboard = Dashboard {
-        id: existing.id,
-        title: title.or(existing.title),
-        description: existing.description,
-        widgets: typed_widgets.or(existing.widgets),
-        layout_type: existing.layout_type,
-        is_read_only: existing.is_read_only,
-        notify_list: existing.notify_list,
-        template_variables: existing.template_variables,
-    };
+    let mut updated_dashboard = existing;
+    let dashboard = updated_dashboard
+        .as_object_mut()
+        .ok_or_else(|| anyhow::anyhow!("Datadog returned a non-object dashboard"))?;
+    if let Some(title) = title {
+        dashboard.insert("title".to_string(), json!(title));
+    }
+    if let Some(widgets) = widgets {
+        dashboard.insert("widgets".to_string(), json!(widgets));
+    }
+    dashboard.remove("id");
+    dashboard.remove("author_handle");
+    dashboard.remove("created_at");
+    dashboard.remove("modified_at");
+    dashboard.remove("url");
 
     let result = api
         .update_dashboard(&dashboard_id.0, &updated_dashboard)
@@ -168,18 +158,24 @@ pub async fn update_dashboard(
         "dashboard_updated",
         ctx,
         data,
-        format!("Updated dashboard: {:?} (ID: {:?})", data.title, data.id),
+        format!(
+            "Updated dashboard: {}",
+            data["title"].as_str().unwrap_or("Untitled")
+        ),
         {
             json!({
-                "dashboard_id": data.id,
-                "dashboard_title": data.title,
+                "dashboard_id": data["id"],
+                "dashboard_title": data["title"],
                 "status": "updated",
             })
         }
     )
 }
 
-pub async fn delete_dashboard(ctx: ToolContext, dashboard_id: DashboardId) -> anyhow::Result<Value> {
+pub async fn delete_dashboard(
+    ctx: ToolContext,
+    dashboard_id: DashboardId,
+) -> anyhow::Result<Value> {
     info!("Deleting dashboard: {}", dashboard_id);
 
     let api = ctx.dashboards_api();

@@ -77,6 +77,25 @@ pub async fn get_kubernetes_deployments(
             .unwrap_or_default()
     );
 
+    if let Some(namespace) = namespace.as_deref() {
+        let valid = !namespace.is_empty()
+            && namespace.len() <= 63
+            && namespace
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+            && namespace
+                .as_bytes()
+                .first()
+                .is_some_and(u8::is_ascii_alphanumeric)
+            && namespace
+                .as_bytes()
+                .last()
+                .is_some_and(u8::is_ascii_alphanumeric);
+        if !valid {
+            anyhow::bail!("Namespace must be a valid lowercase DNS-1123 label");
+        }
+    }
+
     // Query for deployment replicas in the last 5 minutes
     let to_ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -87,11 +106,11 @@ pub async fn get_kubernetes_deployments(
     // Build query with optional namespace filter
     let namespace_filter = namespace
         .as_ref()
-        .map(|ns| format!(",kube_namespace:{}", ns))
-        .unwrap_or_default();
+        .map(|ns| format!("kube_namespace:{ns}"))
+        .unwrap_or_else(|| "*".to_string());
 
     let query = format!(
-        "avg:kubernetes_state.deployment.replicas_desired{{*{}}} by {{kube_deployment,kube_namespace,kube_cluster_name}}",
+        "avg:kubernetes_state.deployment.replicas_desired{{{}}} by {{kube_deployment,kube_namespace,kube_cluster_name}}",
         namespace_filter
     );
 
@@ -107,16 +126,14 @@ pub async fn get_kubernetes_deployments(
         {
             let mut unique_deployment_names = HashSet::new();
             let mut unique_namespaces = HashSet::new();
-            if let Some(series) = &data.series {
-                for s in series {
-                    if let Some(scope) = &s.scope {
-                        for tag in scope.split(',') {
-                            if let Some((key, value)) = tag.split_once(':') {
-                                if key == "kube_deployment" {
-                                    unique_deployment_names.insert(value.to_string());
-                                } else if key == "kube_namespace" {
-                                    unique_namespaces.insert(value.to_string());
-                                }
+            if let Some(response) = &data.data {
+                for series in &response.attributes.series {
+                    for tag in &series.group_tags {
+                        if let Some((key, value)) = tag.split_once(':') {
+                            if key == "kube_deployment" {
+                                unique_deployment_names.insert(value.to_string());
+                            } else if key == "kube_namespace" {
+                                unique_namespaces.insert(value.to_string());
                             }
                         }
                     }
@@ -134,15 +151,12 @@ pub async fn get_kubernetes_deployments(
             let mut unique_deployment_names = HashSet::new();
             let mut unique_namespaces = HashSet::new();
 
-            if let Some(series) = &data.series {
-                for s in series {
-                    // Parse tags from scope
+            if let Some(response) = &data.data {
+                for (index, series) in response.attributes.series.iter().enumerate() {
                     let mut tags = HashMap::new();
-                    if let Some(scope) = &s.scope {
-                        for tag in scope.split(',') {
-                            if let Some((key, value)) = tag.split_once(':') {
-                                tags.insert(key.to_string(), value.to_string());
-                            }
+                    for tag in &series.group_tags {
+                        if let Some((key, value)) = tag.split_once(':') {
+                            tags.insert(key.to_string(), value.to_string());
                         }
                     }
 
@@ -158,6 +172,12 @@ pub async fn get_kubernetes_deployments(
                         .get("kube_cluster_name")
                         .cloned()
                         .unwrap_or_else(|| "unknown".to_string());
+                    let desired_replicas = response
+                        .attributes
+                        .values
+                        .get(index)
+                        .and_then(|values| values.iter().rev().flatten().next())
+                        .copied();
 
                     unique_deployment_names.insert(deployment.clone());
                     unique_namespaces.insert(ns.clone());
@@ -166,6 +186,7 @@ pub async fn get_kubernetes_deployments(
                         "deployment": deployment,
                         "namespace": ns,
                         "cluster": cluster,
+                        "desired_replicas": desired_replicas,
                     }));
                 }
             }

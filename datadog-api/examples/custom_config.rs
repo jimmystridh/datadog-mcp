@@ -4,16 +4,13 @@
 //!
 //! Run with: cargo run --example custom_config
 
-use datadog_api::{apis::MetricsApi, config::DatadogConfig, DatadogClient};
+use datadog_api::{apis::MetricsApi, config::DatadogConfig, DatadogClient, TimestampSecs};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Method 1: Direct configuration
-    let config = DatadogConfig::new(
-        "your-api-key".to_string(),
-        "your-app-key".to_string(),
-    )
-    .with_site("datadoghq.eu".to_string()); // Use EU datacenter
+    let config = DatadogConfig::new("your-api-key".to_string(), "your-app-key".to_string())
+        .with_site("datadoghq.eu".to_string()); // Use EU datacenter
 
     println!("Config 1 - Site: {}", config.site);
     println!("Config 1 - Base URL: {}", config.base_url());
@@ -34,7 +31,9 @@ async fn main() -> anyhow::Result<()> {
         let metrics_api = MetricsApi::new(client);
 
         // List metrics matching a pattern
-        let metrics = metrics_api.list_metrics("system.cpu").await?;
+        let metrics = metrics_api
+            .list_active_metrics(TimestampSecs::now().0 - 86_400)
+            .await?;
         println!(
             "Found {} metrics matching 'system.cpu'",
             metrics.metrics.as_ref().map(|m| m.len()).unwrap_or(0)

@@ -2,7 +2,7 @@
 //!
 //! Provides helper functions and macros to reduce duplication in tool implementations.
 
-use crate::cache::store_data;
+use crate::cache::{default_cache_dir, enforce_cache_size_in, store_data};
 use crate::output::{Formattable, OutputFormat};
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -15,14 +15,13 @@ pub const RESPONSE_SIZE_WARN_THRESHOLD: usize = 1024 * 1024;
 pub const RESPONSE_SIZE_MAX: usize = 10 * 1024 * 1024;
 
 /// Check response size and log warnings if needed
-fn check_response_size<T: Serialize>(data: &T, prefix: &str) -> Option<usize> {
+fn check_response_size<T: Serialize>(data: &T, prefix: &str) -> anyhow::Result<usize> {
     match serde_json::to_string(data) {
         Ok(json_str) => {
             let size = json_str.len();
             if size > RESPONSE_SIZE_MAX {
-                warn!(
-                    "{}: Response size ({} bytes) exceeds maximum ({} bytes), data may be truncated",
-                    prefix, size, RESPONSE_SIZE_MAX
+                anyhow::bail!(
+                    "{prefix}: response is {size} bytes, exceeding the {RESPONSE_SIZE_MAX}-byte limit; use pagination or a narrower query"
                 );
             } else if size > RESPONSE_SIZE_WARN_THRESHOLD {
                 warn!(
@@ -30,10 +29,17 @@ fn check_response_size<T: Serialize>(data: &T, prefix: &str) -> Option<usize> {
                     prefix, size
                 );
             }
-            Some(size)
+            Ok(size)
         }
-        Err(_) => None,
+        Err(error) => Err(error.into()),
     }
+}
+
+fn cache_allowed(prefix: &str) -> bool {
+    !matches!(
+        prefix,
+        "logs" | "users" | "security_rules" | "incidents" | "events" | "event"
+    )
 }
 
 /// Create a successful tool response with cached data
@@ -41,14 +47,24 @@ pub async fn tool_success<T: Serialize + Formattable>(
     data: &T,
     prefix: &str,
     format: OutputFormat,
+    cache_enabled: bool,
+    cache_max_bytes: u64,
     summary: impl Into<String>,
 ) -> anyhow::Result<Value> {
-    check_response_size(data, prefix);
-    let filepath = store_data(data, prefix, format).await?;
+    check_response_size(data, prefix)?;
+    let filepath = if cache_enabled && cache_allowed(prefix) {
+        let filepath = store_data(data, prefix, format).await?;
+        enforce_cache_size_in(&default_cache_dir(), cache_max_bytes).await?;
+        Some(filepath)
+    } else {
+        None
+    };
+    let inline_data = serde_json::to_value(data)?;
     let summary = summary.into();
     info!("{}", summary);
     Ok(json!({
         "filepath": filepath,
+        "data": inline_data,
         "summary": summary,
         "status": "success",
     }))
@@ -59,16 +75,26 @@ pub async fn tool_success_with_fields<T: Serialize + Formattable>(
     data: &T,
     prefix: &str,
     format: OutputFormat,
+    cache_enabled: bool,
+    cache_max_bytes: u64,
     summary: impl Into<String>,
     additional_fields: Value,
 ) -> anyhow::Result<Value> {
-    check_response_size(data, prefix);
-    let filepath = store_data(data, prefix, format).await?;
+    check_response_size(data, prefix)?;
+    let filepath = if cache_enabled && cache_allowed(prefix) {
+        let filepath = store_data(data, prefix, format).await?;
+        enforce_cache_size_in(&default_cache_dir(), cache_max_bytes).await?;
+        Some(filepath)
+    } else {
+        None
+    };
+    let inline_data = serde_json::to_value(data)?;
     let summary = summary.into();
     info!("{}", summary);
 
     let mut response = json!({
         "filepath": filepath,
+        "data": inline_data,
         "summary": summary,
         "status": "success",
     });
@@ -133,7 +159,15 @@ macro_rules! tool_response {
     ($result:expr, $prefix:expr, $ctx:expr, $summary:expr) => {
         match $result {
             Ok(data) => {
-                $crate::response::tool_success(&data, $prefix, $ctx.output_format, $summary).await
+                $crate::response::tool_success(
+                    &data,
+                    $prefix,
+                    $ctx.output_format,
+                    $ctx.cache_responses,
+                    $ctx.cache_max_bytes,
+                    $summary,
+                )
+                .await
             }
             Err(e) => Ok($crate::response::tool_error($prefix, e)),
         }
@@ -155,6 +189,8 @@ macro_rules! tool_response_with_fields {
                     &$data_ident,
                     $prefix,
                     $ctx.output_format,
+                    $ctx.cache_responses,
+                    $ctx.cache_max_bytes,
                     $summary,
                     $fields,
                 )
@@ -199,7 +235,6 @@ mod tests {
     fn test_check_response_size_small() {
         let data = json!({"key": "value"});
         let size = check_response_size(&data, "test");
-        assert!(size.is_some());
         assert!(size.unwrap() < RESPONSE_SIZE_WARN_THRESHOLD);
     }
 

@@ -45,7 +45,7 @@ impl MetricsApi {
         });
 
         self.client
-            .post_retryable("/api/v2/query/timeseries", &request)
+            .post_search("/api/v2/query/timeseries", &request)
             .await
     }
 

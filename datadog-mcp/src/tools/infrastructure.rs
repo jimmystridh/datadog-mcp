@@ -1,11 +1,126 @@
 //! Infrastructure and Kubernetes tools
 
+use crate::response::{CachePolicy, ToolOutput};
 use crate::state::ToolContext;
-use serde_json::{json, Value};
-use std::collections::{HashMap, HashSet};
+use datadog_api::models::TimeseriesFormulaQueryResponse;
+use datadog_api::TimestampSecs;
+use serde::Serialize;
+use serde_json::json;
+use std::collections::{BTreeSet, HashMap};
+use std::fmt;
 use tracing::info;
 
-pub async fn get_infrastructure(ctx: ToolContext) -> anyhow::Result<Value> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct KubernetesNamespace(String);
+
+impl TryFrom<String> for KubernetesNamespace {
+    type Error = anyhow::Error;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let valid = !value.is_empty()
+            && value.len() <= 63
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+            && value
+                .as_bytes()
+                .first()
+                .is_some_and(u8::is_ascii_alphanumeric)
+            && value
+                .as_bytes()
+                .last()
+                .is_some_and(u8::is_ascii_alphanumeric);
+        if !valid {
+            anyhow::bail!("namespace must be a valid lowercase DNS-1123 label");
+        }
+        Ok(Self(value))
+    }
+}
+
+impl fmt::Display for KubernetesNamespace {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct DeploymentState {
+    deployment: String,
+    namespace: String,
+    cluster: String,
+    desired_replicas: Option<f64>,
+}
+
+#[derive(Debug, Serialize)]
+struct DeploymentSnapshot {
+    deployments: Vec<DeploymentState>,
+    unique_deployment_names: Vec<String>,
+    unique_namespaces: Vec<String>,
+}
+
+impl DeploymentSnapshot {
+    fn from_response(response: &TimeseriesFormulaQueryResponse) -> Self {
+        let mut deployments = Vec::new();
+        let mut deployment_names = BTreeSet::new();
+        let mut namespaces = BTreeSet::new();
+
+        if let Some(data) = &response.data {
+            for (index, series) in data.attributes.series.iter().enumerate() {
+                let tags: HashMap<_, _> = series
+                    .group_tags
+                    .iter()
+                    .filter_map(|tag| tag.split_once(':'))
+                    .collect();
+                let deployment = tags
+                    .get("kube_deployment")
+                    .copied()
+                    .unwrap_or("unknown")
+                    .to_string();
+                let namespace = tags
+                    .get("kube_namespace")
+                    .copied()
+                    .unwrap_or("unknown")
+                    .to_string();
+                let cluster = tags
+                    .get("kube_cluster_name")
+                    .copied()
+                    .unwrap_or("unknown")
+                    .to_string();
+                let desired_replicas = data
+                    .attributes
+                    .values
+                    .get(index)
+                    .and_then(|values| values.iter().rev().flatten().next())
+                    .copied();
+
+                deployment_names.insert(deployment.clone());
+                namespaces.insert(namespace.clone());
+                deployments.push(DeploymentState {
+                    deployment,
+                    namespace,
+                    cluster,
+                    desired_replicas,
+                });
+            }
+        }
+
+        Self {
+            deployments,
+            unique_deployment_names: deployment_names.into_iter().collect(),
+            unique_namespaces: namespaces.into_iter().collect(),
+        }
+    }
+
+    fn summary(&self) -> String {
+        format!(
+            "Found {} deployments across {} namespaces",
+            self.unique_deployment_names.len(),
+            self.unique_namespaces.len()
+        )
+    }
+}
+
+pub async fn get_infrastructure(ctx: ToolContext) -> anyhow::Result<ToolOutput> {
     info!("Getting infrastructure information");
 
     let api = ctx.infrastructure_api();
@@ -13,8 +128,7 @@ pub async fn get_infrastructure(ctx: ToolContext) -> anyhow::Result<Value> {
 
     tool_response_with_fields!(
         result,
-        "infrastructure",
-        ctx,
+        cache("infrastructure"),
         data,
         {
             let hosts = data.host_list.as_ref().map(|h| h.len()).unwrap_or(0);
@@ -38,7 +152,7 @@ pub async fn get_infrastructure(ctx: ToolContext) -> anyhow::Result<Value> {
     )
 }
 
-pub async fn get_tags(ctx: ToolContext, source: Option<String>) -> anyhow::Result<Value> {
+pub async fn get_tags(ctx: ToolContext, source: Option<String>) -> anyhow::Result<ToolOutput> {
     info!("Getting host tags");
 
     let api = ctx.infrastructure_api();
@@ -46,8 +160,7 @@ pub async fn get_tags(ctx: ToolContext, source: Option<String>) -> anyhow::Resul
 
     tool_response_with_fields!(
         result,
-        "tags",
-        ctx,
+        cache("tags"),
         data,
         {
             let tags = data.tags.as_ref().map(|t| t.len()).unwrap_or(0);
@@ -66,8 +179,8 @@ pub async fn get_tags(ctx: ToolContext, source: Option<String>) -> anyhow::Resul
 pub async fn get_kubernetes_deployments(
     ctx: ToolContext,
     namespace: Option<String>,
-) -> anyhow::Result<Value> {
-    use std::time::{SystemTime, UNIX_EPOCH};
+) -> anyhow::Result<ToolOutput> {
+    let namespace = namespace.map(KubernetesNamespace::try_from).transpose()?;
 
     info!(
         "Getting Kubernetes deployments{}",
@@ -77,36 +190,13 @@ pub async fn get_kubernetes_deployments(
             .unwrap_or_default()
     );
 
-    if let Some(namespace) = namespace.as_deref() {
-        let valid = !namespace.is_empty()
-            && namespace.len() <= 63
-            && namespace
-                .bytes()
-                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
-            && namespace
-                .as_bytes()
-                .first()
-                .is_some_and(u8::is_ascii_alphanumeric)
-            && namespace
-                .as_bytes()
-                .last()
-                .is_some_and(u8::is_ascii_alphanumeric);
-        if !valid {
-            anyhow::bail!("Namespace must be a valid lowercase DNS-1123 label");
-        }
-    }
-
-    // Query for deployment replicas in the last 5 minutes
-    let to_ts = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or_else(|_| chrono::Utc::now().timestamp());
-    let from_ts = to_ts - 300; // 5 minutes ago
+    let to_ts = TimestampSecs::now().as_secs();
+    let from_ts = to_ts - 300;
 
     // Build query with optional namespace filter
     let namespace_filter = namespace
         .as_ref()
-        .map(|ns| format!("kube_namespace:{ns}"))
+        .map(|namespace| format!("kube_namespace:{namespace}"))
         .unwrap_or_else(|| "*".to_string());
 
     let query = format!(
@@ -116,92 +206,24 @@ pub async fn get_kubernetes_deployments(
 
     // Use existing metrics API
     let api = ctx.metrics_api();
-    let result = api.query_metrics(from_ts, to_ts, &query).await;
-
-    tool_response_with_fields!(
-        result,
-        "kubernetes_deployments",
-        ctx,
-        data,
-        {
-            let mut unique_deployment_names = HashSet::new();
-            let mut unique_namespaces = HashSet::new();
-            if let Some(response) = &data.data {
-                for series in &response.attributes.series {
-                    for tag in &series.group_tags {
-                        if let Some((key, value)) = tag.split_once(':') {
-                            if key == "kube_deployment" {
-                                unique_deployment_names.insert(value.to_string());
-                            } else if key == "kube_namespace" {
-                                unique_namespaces.insert(value.to_string());
-                            }
-                        }
-                    }
-                }
-            }
-            format!(
-                "Found {} deployments across {} namespaces",
-                unique_deployment_names.len(),
-                unique_namespaces.len()
-            )
-        },
-        {
-            // Extract deployment information from series
-            let mut deployments = Vec::new();
-            let mut unique_deployment_names = HashSet::new();
-            let mut unique_namespaces = HashSet::new();
-
-            if let Some(response) = &data.data {
-                for (index, series) in response.attributes.series.iter().enumerate() {
-                    let mut tags = HashMap::new();
-                    for tag in &series.group_tags {
-                        if let Some((key, value)) = tag.split_once(':') {
-                            tags.insert(key.to_string(), value.to_string());
-                        }
-                    }
-
-                    let deployment = tags
-                        .get("kube_deployment")
-                        .cloned()
-                        .unwrap_or_else(|| "unknown".to_string());
-                    let ns = tags
-                        .get("kube_namespace")
-                        .cloned()
-                        .unwrap_or_else(|| "unknown".to_string());
-                    let cluster = tags
-                        .get("kube_cluster_name")
-                        .cloned()
-                        .unwrap_or_else(|| "unknown".to_string());
-                    let desired_replicas = response
-                        .attributes
-                        .values
-                        .get(index)
-                        .and_then(|values| values.iter().rev().flatten().next())
-                        .copied();
-
-                    unique_deployment_names.insert(deployment.clone());
-                    unique_namespaces.insert(ns.clone());
-
-                    deployments.push(json!({
-                        "deployment": deployment,
-                        "namespace": ns,
-                        "cluster": cluster,
-                        "desired_replicas": desired_replicas,
-                    }));
-                }
-            }
-
-            let mut deployment_names: Vec<String> = unique_deployment_names.into_iter().collect();
-            deployment_names.sort();
-
-            let mut namespace_list: Vec<String> = unique_namespaces.into_iter().collect();
-            namespace_list.sort();
-
-            json!({
-                "deployments": deployments,
-                "unique_deployment_names": deployment_names,
-                "unique_namespaces": namespace_list,
-            })
-        }
+    let data = api.query_metrics(from_ts, to_ts, &query).await?;
+    let snapshot = DeploymentSnapshot::from_response(&data);
+    ToolOutput::from_data(
+        &data,
+        snapshot.summary(),
+        serde_json::to_value(snapshot)?,
+        CachePolicy::Store("kubernetes_deployments"),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kubernetes_namespaces_are_dns_labels() {
+        assert!(KubernetesNamespace::try_from("production".to_string()).is_ok());
+        assert!(KubernetesNamespace::try_from("Production".to_string()).is_err());
+        assert!(KubernetesNamespace::try_from("-invalid".to_string()).is_err());
+    }
 }

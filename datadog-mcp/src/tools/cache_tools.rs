@@ -1,7 +1,6 @@
 //! Cache analysis and management tools
 
-use crate::cache::{cleanup_cache_in, load_data_in};
-use crate::response::tool_error;
+use crate::response::{simple_success_with_fields, CachePolicy, ToolOutput};
 use crate::state::ToolContext;
 use serde_json::{json, Value};
 use tracing::info;
@@ -10,56 +9,51 @@ pub async fn analyze_data(
     ctx: ToolContext,
     filepath: String,
     analysis_type: Option<String>,
-) -> anyhow::Result<Value> {
+) -> anyhow::Result<ToolOutput> {
     info!("Analyzing data from: {}", filepath);
 
-    let data = load_data_in(&filepath, &ctx.cache_dir).await?;
+    let data = ctx.cache.load(&filepath).await?;
     let analysis = analysis_type.unwrap_or_else(|| "summary".to_string());
 
     let result = match analysis.as_str() {
         "summary" => generate_summary(&data),
         "stats" => calculate_stats(&data),
         "trends" => analyze_trends(&data),
-        _ => {
-            return Ok(json!({
-                "error": format!("Unknown analysis type: {}", analysis),
-                "status": "error",
-            }));
-        }
+        _ => anyhow::bail!("unknown analysis type: {analysis}"),
     };
 
     info!("Completed {} analysis of {}", analysis, filepath);
 
-    Ok(json!({
-        "analysis_type": analysis,
-        "filepath": filepath,
-        "result": result,
-        "status": "success",
-    }))
+    ToolOutput::from_data(
+        &result,
+        format!("Completed {analysis} analysis"),
+        json!({
+            "analysis_type": analysis,
+            "source_filepath": filepath,
+        }),
+        CachePolicy::Never,
+    )
 }
 
 pub async fn cleanup_cache_tool(
     ctx: ToolContext,
     older_than_hours: Option<u64>,
-) -> anyhow::Result<Value> {
+) -> anyhow::Result<ToolOutput> {
     let hours = older_than_hours.unwrap_or(24);
     info!("Cleaning up cache files older than {} hours", hours);
 
-    match cleanup_cache_in(&ctx.cache_dir, hours).await {
-        Ok(deleted_count) => {
-            info!(
-                "Cleaned up {} files older than {} hours",
-                deleted_count, hours
-            );
-            Ok(json!({
-                "summary": format!("Cleaned up {} files older than {} hours", deleted_count, hours),
-                "deleted_count": deleted_count,
-                "cache_directory": ctx.cache_dir,
-                "status": "success",
-            }))
-        }
-        Err(e) => Ok(tool_error("Failed to cleanup cache", e)),
-    }
+    let deleted_count = ctx.cache.cleanup(hours).await?;
+    info!(
+        "Cleaned up {} files older than {} hours",
+        deleted_count, hours
+    );
+    simple_success_with_fields(
+        format!("Cleaned up {deleted_count} files older than {hours} hours"),
+        json!({
+            "deleted_count": deleted_count,
+            "cache_directory": ctx.cache.root(),
+        }),
+    )
 }
 
 fn generate_summary(data: &Value) -> Value {

@@ -4,61 +4,34 @@
 //! Tools are organized by domain but must remain in a single impl block
 //! due to rmcp's `#[tool_router]` macro requirements.
 
-use crate::output::{Formattable, OutputFormat};
+use crate::response::render_tool_result;
 use crate::state::ServerState;
 use crate::tool_inputs::*;
 use crate::tools;
 use rmcp::{
     handler::server::{tool::ToolRouter, wrapper::Parameters},
-    model::{CallToolResult, ContentBlock, ErrorData, ToolAnnotations},
+    model::{CallToolResult, ErrorData},
     tool, tool_handler, tool_router, ServerHandler,
 };
-use serde::Serialize;
 use std::sync::Arc;
-
-/// Format response using the specified format with fallback to JSON
-fn format_response<T: Serialize + Formattable>(data: &T, format: OutputFormat) -> String {
-    data.format(format)
-        .unwrap_or_else(|_| serde_json::to_string_pretty(data).unwrap_or_default())
-}
 
 /// Helper macro to reduce boilerplate in tool implementations.
 /// Handles the common pattern of: call tool function -> format response -> return success
 macro_rules! tool_call {
     ($self:ident, $func:expr) => {{
-        let result = match $func.await {
-            Ok(result) => result,
-            Err(error) => {
-                tracing::error!(tool_error = %error, "Datadog MCP tool failed");
-                serde_json::json!({
-                    "status": "error",
-                    "error": error.to_string(),
-                })
-            }
-        };
-        let text = format_response(&result, $self.state.output_format);
-        let is_error = result.get("status").and_then(|value| value.as_str()) == Some("error");
-        let mut response = if is_error {
-            CallToolResult::structured_error(result)
-        } else {
-            CallToolResult::structured(result)
-        };
-        response.content = vec![ContentBlock::text(text)];
-        Ok(response)
+        let context = $self.state.tool_context();
+        Ok(render_tool_result($func.await, &context).await)
     }};
 }
 
 macro_rules! write_tool_call {
-    ($self:ident, $name:literal, $func:expr) => {{
-        if !$self.state.allow_write {
-            let result = serde_json::json!({
-                "status": "error",
-                "error": format!(
-                    "{} is disabled because the server is running in read-only mode; restart with --allow-write to enable Datadog mutations",
-                    $name
-                ),
-            });
-            Ok(CallToolResult::structured_error(result))
+    ($self:ident, $func:expr) => {{
+        if !$self.state.access_mode().allows_writes() {
+            let context = $self.state.tool_context();
+            let error = anyhow::anyhow!(
+                "this tool is disabled because the server is running in read-only mode; restart with --allow-write to enable Datadog mutations"
+            );
+            Ok(render_tool_result(Err(error), &context).await)
         } else {
             tool_call!($self, $func)
         }
@@ -71,58 +44,13 @@ pub struct DatadogMcpServer {
     tool_router: ToolRouter<Self>,
 }
 
+#[rustfmt::skip]
 #[tool_router]
 impl DatadogMcpServer {
     pub fn new(state: ServerState) -> Self {
-        let mut tool_router = Self::tool_router();
-        for route in tool_router.map.values_mut() {
-            route.attr.annotations = Some(
-                ToolAnnotations::new()
-                    .read_only(true)
-                    .destructive(false)
-                    .idempotent(true)
-                    .open_world(true),
-            );
-        }
-
-        let write_tools = [
-            ("create_monitor", false, false),
-            ("update_monitor", true, true),
-            ("delete_monitor", true, true),
-            ("create_dashboard", false, false),
-            ("update_dashboard", true, true),
-            ("delete_dashboard", true, true),
-            ("create_event", false, false),
-            ("create_downtime", false, false),
-            ("cancel_downtime", true, true),
-            ("create_synthetics_test", false, false),
-            ("update_synthetics_test", true, true),
-            ("trigger_synthetics_tests", false, false),
-            ("delete_synthetics_tests", true, true),
-            ("cleanup_cache", true, true),
-        ];
-        for (name, destructive, idempotent) in write_tools {
-            if let Some(route) = tool_router.map.get_mut(name) {
-                route.attr.annotations = Some(
-                    ToolAnnotations::new()
-                        .read_only(false)
-                        .destructive(destructive)
-                        .idempotent(idempotent)
-                        .open_world(name != "cleanup_cache"),
-                );
-            }
-        }
-        for name in ["analyze_data", "cleanup_cache"] {
-            if let Some(route) = tool_router.map.get_mut(name) {
-                if let Some(annotations) = route.attr.annotations.as_mut() {
-                    annotations.open_world_hint = Some(false);
-                }
-            }
-        }
-
         Self {
             state: Arc::new(state),
-            tool_router,
+            tool_router: Self::tool_router(),
         }
     }
 
@@ -130,7 +58,7 @@ impl DatadogMcpServer {
     // VALIDATION
     // ============================================================================
 
-    #[tool(description = "Validate Datadog API credentials")]
+    #[tool(description = "Validate Datadog API credentials", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = true))]
     pub async fn validate_api_key(&self) -> Result<CallToolResult, ErrorData> {
         tool_call!(self, tools::validate_api_key(self.state.tool_context()))
     }
@@ -139,7 +67,7 @@ impl DatadogMcpServer {
     // METRICS
     // ============================================================================
 
-    #[tool(description = "Query Datadog metrics time series data")]
+    #[tool(description = "Query Datadog metrics time series data", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = true))]
     pub async fn get_metrics(
         &self,
         Parameters(input): Parameters<GetMetricsInput>,
@@ -155,7 +83,7 @@ impl DatadogMcpServer {
         )
     }
 
-    #[tool(description = "Search for metrics by name pattern")]
+    #[tool(description = "Search for metrics by name pattern", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = true))]
     pub async fn search_metrics(
         &self,
         Parameters(input): Parameters<SearchMetricsInput>,
@@ -166,7 +94,7 @@ impl DatadogMcpServer {
         )
     }
 
-    #[tool(description = "Get metadata for a specific metric")]
+    #[tool(description = "Get metadata for a specific metric", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = true))]
     pub async fn get_metric_metadata(
         &self,
         Parameters(input): Parameters<GetMetricMetadataInput>,
@@ -181,12 +109,12 @@ impl DatadogMcpServer {
     // MONITORS
     // ============================================================================
 
-    #[tool(description = "Get all Datadog monitors")]
+    #[tool(description = "Get all Datadog monitors", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = true))]
     pub async fn get_monitors(&self) -> Result<CallToolResult, ErrorData> {
         tool_call!(self, tools::get_monitors(self.state.tool_context()))
     }
 
-    #[tool(description = "Search Datadog monitors")]
+    #[tool(description = "Search Datadog monitors", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = true))]
     pub async fn search_monitors(
         &self,
         Parameters(input): Parameters<SearchMonitorsInput>,
@@ -203,7 +131,7 @@ impl DatadogMcpServer {
         )
     }
 
-    #[tool(description = "Get specific monitor by ID")]
+    #[tool(description = "Get specific monitor by ID", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = true))]
     pub async fn get_monitor(
         &self,
         Parameters(input): Parameters<GetMonitorInput>,
@@ -214,14 +142,13 @@ impl DatadogMcpServer {
         )
     }
 
-    #[tool(description = "Create a new Datadog monitor")]
+    #[tool(description = "Create a new Datadog monitor", annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = true))]
     pub async fn create_monitor(
         &self,
         Parameters(input): Parameters<CreateMonitorInput>,
     ) -> Result<CallToolResult, ErrorData> {
         write_tool_call!(
             self,
-            "create_monitor",
             tools::create_monitor(
                 self.state.tool_context(),
                 input.name,
@@ -234,14 +161,13 @@ impl DatadogMcpServer {
         )
     }
 
-    #[tool(description = "Update an existing Datadog monitor")]
+    #[tool(description = "Update an existing Datadog monitor", annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = true, open_world_hint = true))]
     pub async fn update_monitor(
         &self,
         Parameters(input): Parameters<UpdateMonitorInput>,
     ) -> Result<CallToolResult, ErrorData> {
         write_tool_call!(
             self,
-            "update_monitor",
             tools::update_monitor(
                 self.state.tool_context(),
                 input.monitor_id,
@@ -254,14 +180,13 @@ impl DatadogMcpServer {
         )
     }
 
-    #[tool(description = "Delete a monitor")]
+    #[tool(description = "Delete a monitor", annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = true, open_world_hint = true))]
     pub async fn delete_monitor(
         &self,
         Parameters(input): Parameters<DeleteMonitorInput>,
     ) -> Result<CallToolResult, ErrorData> {
         write_tool_call!(
             self,
-            "delete_monitor",
             tools::delete_monitor(self.state.tool_context(), input.monitor_id)
         )
     }
@@ -270,12 +195,12 @@ impl DatadogMcpServer {
     // DASHBOARDS
     // ============================================================================
 
-    #[tool(description = "Get all Datadog dashboards")]
+    #[tool(description = "Get all Datadog dashboards", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = true))]
     pub async fn get_dashboards(&self) -> Result<CallToolResult, ErrorData> {
         tool_call!(self, tools::get_dashboards(self.state.tool_context()))
     }
 
-    #[tool(description = "Get specific dashboard by ID")]
+    #[tool(description = "Get specific dashboard by ID", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = true))]
     pub async fn get_dashboard(
         &self,
         Parameters(input): Parameters<GetDashboardInput>,
@@ -286,14 +211,13 @@ impl DatadogMcpServer {
         )
     }
 
-    #[tool(description = "Create a new dashboard")]
+    #[tool(description = "Create a new dashboard", annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = true))]
     pub async fn create_dashboard(
         &self,
         Parameters(input): Parameters<CreateDashboardInput>,
     ) -> Result<CallToolResult, ErrorData> {
         write_tool_call!(
             self,
-            "create_dashboard",
             tools::create_dashboard(
                 self.state.tool_context(),
                 input.title,
@@ -304,14 +228,13 @@ impl DatadogMcpServer {
         )
     }
 
-    #[tool(description = "Update an existing dashboard")]
+    #[tool(description = "Update an existing dashboard", annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = true, open_world_hint = true))]
     pub async fn update_dashboard(
         &self,
         Parameters(input): Parameters<UpdateDashboardInput>,
     ) -> Result<CallToolResult, ErrorData> {
         write_tool_call!(
             self,
-            "update_dashboard",
             tools::update_dashboard(
                 self.state.tool_context(),
                 input.dashboard_id,
@@ -321,14 +244,13 @@ impl DatadogMcpServer {
         )
     }
 
-    #[tool(description = "Delete a dashboard")]
+    #[tool(description = "Delete a dashboard", annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = true, open_world_hint = true))]
     pub async fn delete_dashboard(
         &self,
         Parameters(input): Parameters<DeleteDashboardInput>,
     ) -> Result<CallToolResult, ErrorData> {
         write_tool_call!(
             self,
-            "delete_dashboard",
             tools::delete_dashboard(self.state.tool_context(), input.dashboard_id)
         )
     }
@@ -337,7 +259,7 @@ impl DatadogMcpServer {
     // LOGS & EVENTS
     // ============================================================================
 
-    #[tool(description = "Search Datadog logs")]
+    #[tool(description = "Search Datadog logs", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = true))]
     pub async fn search_logs(
         &self,
         Parameters(input): Parameters<SearchLogsInput>,
@@ -355,7 +277,7 @@ impl DatadogMcpServer {
         )
     }
 
-    #[tool(description = "Get Datadog events")]
+    #[tool(description = "Get Datadog events", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = true))]
     pub async fn get_events(
         &self,
         Parameters(input): Parameters<GetEventsInput>,
@@ -372,14 +294,13 @@ impl DatadogMcpServer {
         )
     }
 
-    #[tool(description = "Create a Datadog event")]
+    #[tool(description = "Create a Datadog event", annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = true))]
     pub async fn create_event(
         &self,
         Parameters(input): Parameters<CreateEventInput>,
     ) -> Result<CallToolResult, ErrorData> {
         write_tool_call!(
             self,
-            "create_event",
             tools::create_event(
                 self.state.tool_context(),
                 input.title,
@@ -397,7 +318,7 @@ impl DatadogMcpServer {
         )
     }
 
-    #[tool(description = "Get Datadog event by ID")]
+    #[tool(description = "Get Datadog event by ID", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = true))]
     pub async fn get_event(
         &self,
         Parameters(input): Parameters<GetEventInput>,
@@ -412,12 +333,12 @@ impl DatadogMcpServer {
     // INFRASTRUCTURE
     // ============================================================================
 
-    #[tool(description = "Get infrastructure and hosts information")]
+    #[tool(description = "Get infrastructure and hosts information", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = true))]
     pub async fn get_infrastructure(&self) -> Result<CallToolResult, ErrorData> {
         tool_call!(self, tools::get_infrastructure(self.state.tool_context()))
     }
 
-    #[tool(description = "Get host tags")]
+    #[tool(description = "Get host tags", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = true))]
     pub async fn get_tags(
         &self,
         Parameters(input): Parameters<GetTagsInput>,
@@ -428,7 +349,7 @@ impl DatadogMcpServer {
         )
     }
 
-    #[tool(description = "Get Kubernetes deployments with their current state")]
+    #[tool(description = "Get Kubernetes deployments with their current state", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = true))]
     pub async fn get_kubernetes_deployments(
         &self,
         Parameters(input): Parameters<GetKubernetesDeploymentsInput>,
@@ -443,19 +364,18 @@ impl DatadogMcpServer {
     // DOWNTIMES
     // ============================================================================
 
-    #[tool(description = "Get scheduled downtimes")]
+    #[tool(description = "Get scheduled downtimes", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = true))]
     pub async fn get_downtimes(&self) -> Result<CallToolResult, ErrorData> {
         tool_call!(self, tools::get_downtimes(self.state.tool_context()))
     }
 
-    #[tool(description = "Create a scheduled downtime")]
+    #[tool(description = "Create a scheduled downtime", annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = true))]
     pub async fn create_downtime(
         &self,
         Parameters(input): Parameters<CreateDowntimeInput>,
     ) -> Result<CallToolResult, ErrorData> {
         write_tool_call!(
             self,
-            "create_downtime",
             tools::create_downtime(
                 self.state.tool_context(),
                 input.scope,
@@ -466,14 +386,13 @@ impl DatadogMcpServer {
         )
     }
 
-    #[tool(description = "Cancel a scheduled downtime")]
+    #[tool(description = "Cancel a scheduled downtime", annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = true, open_world_hint = true))]
     pub async fn cancel_downtime(
         &self,
         Parameters(input): Parameters<CancelDowntimeInput>,
     ) -> Result<CallToolResult, ErrorData> {
         write_tool_call!(
             self,
-            "cancel_downtime",
             tools::cancel_downtime(self.state.tool_context(), input.downtime_id)
         )
     }
@@ -482,12 +401,12 @@ impl DatadogMcpServer {
     // SYNTHETICS
     // ============================================================================
 
-    #[tool(description = "Get all Synthetics tests")]
+    #[tool(description = "Get all Synthetics tests", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = true))]
     pub async fn get_synthetics_tests(&self) -> Result<CallToolResult, ErrorData> {
         tool_call!(self, tools::get_synthetics_tests(self.state.tool_context()))
     }
 
-    #[tool(description = "Get all available Synthetics testing locations")]
+    #[tool(description = "Get all available Synthetics testing locations", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = true))]
     pub async fn get_synthetics_locations(&self) -> Result<CallToolResult, ErrorData> {
         tool_call!(
             self,
@@ -495,14 +414,13 @@ impl DatadogMcpServer {
         )
     }
 
-    #[tool(description = "Create a Synthetic API test (HTTP check)")]
+    #[tool(description = "Create a Synthetic API test (HTTP check)", annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = true))]
     pub async fn create_synthetics_test(
         &self,
         Parameters(input): Parameters<CreateSyntheticsTestInput>,
     ) -> Result<CallToolResult, ErrorData> {
         write_tool_call!(
             self,
-            "create_synthetics_test",
             tools::create_synthetics_test(
                 self.state.tool_context(),
                 input.name,
@@ -516,14 +434,13 @@ impl DatadogMcpServer {
         )
     }
 
-    #[tool(description = "Update an existing Synthetics test")]
+    #[tool(description = "Update an existing Synthetics test", annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = true, open_world_hint = true))]
     pub async fn update_synthetics_test(
         &self,
         Parameters(input): Parameters<UpdateSyntheticsTestInput>,
     ) -> Result<CallToolResult, ErrorData> {
         write_tool_call!(
             self,
-            "update_synthetics_test",
             tools::update_synthetics_test(
                 self.state.tool_context(),
                 input.public_id,
@@ -537,26 +454,24 @@ impl DatadogMcpServer {
         )
     }
 
-    #[tool(description = "Trigger Synthetics tests on-demand")]
+    #[tool(description = "Trigger Synthetics tests on-demand", annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = true))]
     pub async fn trigger_synthetics_tests(
         &self,
         Parameters(input): Parameters<TriggerSyntheticsTestsInput>,
     ) -> Result<CallToolResult, ErrorData> {
         write_tool_call!(
             self,
-            "trigger_synthetics_tests",
             tools::trigger_synthetics_tests(self.state.tool_context(), input.test_ids)
         )
     }
 
-    #[tool(description = "Delete Synthetics tests")]
+    #[tool(description = "Delete Synthetics tests", annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = true, open_world_hint = true))]
     pub async fn delete_synthetics_tests(
         &self,
         Parameters(input): Parameters<DeleteSyntheticsTestsInput>,
     ) -> Result<CallToolResult, ErrorData> {
         write_tool_call!(
             self,
-            "delete_synthetics_tests",
             tools::delete_synthetics_tests(
                 self.state.tool_context(),
                 input.test_ids,
@@ -569,12 +484,12 @@ impl DatadogMcpServer {
     // SECURITY & INCIDENTS
     // ============================================================================
 
-    #[tool(description = "Get security monitoring rules")]
+    #[tool(description = "Get security monitoring rules", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = true))]
     pub async fn get_security_rules(&self) -> Result<CallToolResult, ErrorData> {
         tool_call!(self, tools::get_security_rules(self.state.tool_context()))
     }
 
-    #[tool(description = "Get incidents with pagination support")]
+    #[tool(description = "Get incidents with pagination support", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = true))]
     pub async fn get_incidents(
         &self,
         Parameters(input): Parameters<GetIncidentsInput>,
@@ -593,12 +508,12 @@ impl DatadogMcpServer {
     // SLOS & NOTEBOOKS
     // ============================================================================
 
-    #[tool(description = "Get Service Level Objectives")]
+    #[tool(description = "Get Service Level Objectives", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = true))]
     pub async fn get_slos(&self) -> Result<CallToolResult, ErrorData> {
         tool_call!(self, tools::get_slos(self.state.tool_context()))
     }
 
-    #[tool(description = "Get Datadog notebooks")]
+    #[tool(description = "Get Datadog notebooks", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = true))]
     pub async fn get_notebooks(&self) -> Result<CallToolResult, ErrorData> {
         tool_call!(self, tools::get_notebooks(self.state.tool_context()))
     }
@@ -607,10 +522,10 @@ impl DatadogMcpServer {
     // TEAMS & USERS
     // ============================================================================
 
-    #[tool(description = "Get teams")]
+    #[tool(description = "Get teams", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = true))]
     pub async fn get_teams(
         &self,
-        Parameters(input): Parameters<GetTeamsInput>,
+        Parameters(input): Parameters<DirectoryPageInput>,
     ) -> Result<CallToolResult, ErrorData> {
         tool_call!(
             self,
@@ -622,10 +537,10 @@ impl DatadogMcpServer {
         )
     }
 
-    #[tool(description = "Get users")]
+    #[tool(description = "Get users", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = true))]
     pub async fn get_users(
         &self,
-        Parameters(input): Parameters<GetUsersInput>,
+        Parameters(input): Parameters<DirectoryPageInput>,
     ) -> Result<CallToolResult, ErrorData> {
         tool_call!(
             self,
@@ -641,7 +556,7 @@ impl DatadogMcpServer {
     // UTILITIES
     // ============================================================================
 
-    #[tool(description = "Analyze stored Datadog data (summary, stats, or trends)")]
+    #[tool(description = "Analyze stored Datadog data (summary, stats, or trends)", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false))]
     pub async fn analyze_data(
         &self,
         Parameters(input): Parameters<AnalyzeDataInput>,
@@ -656,14 +571,13 @@ impl DatadogMcpServer {
         )
     }
 
-    #[tool(description = "Clean up old cache files")]
+    #[tool(description = "Clean up old cache files", annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = true, open_world_hint = false))]
     pub async fn cleanup_cache(
         &self,
         Parameters(input): Parameters<CleanupCacheInput>,
     ) -> Result<CallToolResult, ErrorData> {
         write_tool_call!(
             self,
-            "cleanup_cache",
             tools::cleanup_cache_tool(self.state.tool_context(), input.older_than_hours)
         )
     }
@@ -694,7 +608,7 @@ mod tests {
     #[tokio::test]
     async fn server_info_uses_current_package_and_protocol() {
         let config = DatadogConfig::new("api-key".into(), "app-key".into());
-        let state = ServerState::new(config, OutputFormat::Json).await.unwrap();
+        let state = ServerState::new(config, OutputFormat::Json).unwrap();
         let server = DatadogMcpServer::new(state);
 
         let info = server.get_info();
@@ -710,13 +624,47 @@ mod tests {
     #[tokio::test]
     async fn write_tools_are_annotated_and_blocked_by_default() {
         let config = DatadogConfig::new("api-key".into(), "app-key".into());
-        let state = ServerState::new(config, OutputFormat::Json).await.unwrap();
+        let state = ServerState::new(config, OutputFormat::Json).unwrap();
         let server = DatadogMcpServer::new(state);
 
-        let tool = server.tool_router.get("create_monitor").unwrap();
-        let annotations = tool.annotations.as_ref().unwrap();
-        assert_eq!(annotations.read_only_hint, Some(false));
-        assert_eq!(annotations.destructive_hint, Some(false));
+        let write_tools = [
+            "create_monitor",
+            "update_monitor",
+            "delete_monitor",
+            "create_dashboard",
+            "update_dashboard",
+            "delete_dashboard",
+            "create_event",
+            "create_downtime",
+            "cancel_downtime",
+            "create_synthetics_test",
+            "update_synthetics_test",
+            "trigger_synthetics_tests",
+            "delete_synthetics_tests",
+            "cleanup_cache",
+        ];
+        for tool in server.tool_router.list_all() {
+            let annotations = tool
+                .annotations
+                .as_ref()
+                .unwrap_or_else(|| panic!("{} has no annotations", tool.name));
+            assert_eq!(
+                annotations.read_only_hint,
+                Some(!write_tools.contains(&tool.name.as_ref())),
+                "unexpected access annotation for {}",
+                tool.name
+            );
+        }
+
+        let create_monitor = server.tool_router.get("create_monitor").unwrap();
+        assert_eq!(
+            create_monitor
+                .annotations
+                .as_ref()
+                .unwrap()
+                .destructive_hint,
+            Some(false)
+        );
 
         let result = server
             .create_monitor(Parameters(CreateMonitorInput {
@@ -744,7 +692,7 @@ mod tests {
 
         let config =
             DatadogConfig::new("api-key".into(), "app-key".into()).with_base_url(mock_server.uri());
-        let state = ServerState::new(config, OutputFormat::Json).await.unwrap();
+        let state = ServerState::new(config, OutputFormat::Json).unwrap();
         let server = DatadogMcpServer::new(state);
         let result = server
             .get_monitor(Parameters(GetMonitorInput {

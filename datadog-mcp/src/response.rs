@@ -1,202 +1,174 @@
-//! Tool response helpers for consistent MCP responses
-//!
-//! Provides helper functions and macros to reduce duplication in tool implementations.
-
-use crate::cache::{default_cache_dir, enforce_cache_size_in, store_data};
-use crate::output::{Formattable, OutputFormat};
+use crate::state::ToolContext;
+use rmcp::model::{CallToolResult, ContentBlock};
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use tracing::{error, info, warn};
 
-/// Maximum response size in bytes before warning (1 MB)
 pub const RESPONSE_SIZE_WARN_THRESHOLD: usize = 1024 * 1024;
-
-/// Maximum response size in bytes before truncation (10 MB)
 pub const RESPONSE_SIZE_MAX: usize = 10 * 1024 * 1024;
 
-/// Check response size and log warnings if needed
-fn check_response_size<T: Serialize>(data: &T, prefix: &str) -> anyhow::Result<usize> {
-    match serde_json::to_string(data) {
-        Ok(json_str) => {
-            let size = json_str.len();
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CachePolicy {
+    Never,
+    Store(&'static str),
+}
+
+#[derive(Debug)]
+pub struct ToolOutput {
+    data: Option<Value>,
+    summary: String,
+    fields: Map<String, Value>,
+    cache_policy: CachePolicy,
+}
+
+impl ToolOutput {
+    const RESERVED_FIELDS: [&'static str; 4] = ["status", "summary", "filepath", "data"];
+
+    pub fn from_data<T: Serialize>(
+        data: &T,
+        summary: impl Into<String>,
+        fields: Value,
+        cache_policy: CachePolicy,
+    ) -> anyhow::Result<Self> {
+        let fields = fields
+            .as_object()
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("tool response fields must be a JSON object"))?;
+        Self::validate_fields(&fields)?;
+        Ok(Self {
+            data: Some(serde_json::to_value(data)?),
+            summary: summary.into(),
+            fields,
+            cache_policy,
+        })
+    }
+
+    pub fn without_data(summary: impl Into<String>, fields: Value) -> anyhow::Result<Self> {
+        let fields = fields
+            .as_object()
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("tool response fields must be a JSON object"))?;
+        Self::validate_fields(&fields)?;
+        Ok(Self {
+            data: None,
+            summary: summary.into(),
+            fields,
+            cache_policy: CachePolicy::Never,
+        })
+    }
+
+    fn validate_fields(fields: &Map<String, Value>) -> anyhow::Result<()> {
+        if let Some(field) = Self::RESERVED_FIELDS
+            .into_iter()
+            .find(|field| fields.contains_key(*field))
+        {
+            anyhow::bail!("tool response field '{field}' is reserved");
+        }
+        Ok(())
+    }
+
+    async fn into_call_result(self, context: &ToolContext) -> anyhow::Result<CallToolResult> {
+        if let Some(data) = &self.data {
+            let size = serde_json::to_vec(data)?.len();
             if size > RESPONSE_SIZE_MAX {
                 anyhow::bail!(
-                    "{prefix}: response is {size} bytes, exceeding the {RESPONSE_SIZE_MAX}-byte limit; use pagination or a narrower query"
-                );
-            } else if size > RESPONSE_SIZE_WARN_THRESHOLD {
-                warn!(
-                    "{}: Large response size ({} bytes), consider using pagination",
-                    prefix, size
+                    "response is {size} bytes, exceeding the {RESPONSE_SIZE_MAX}-byte limit; use pagination or a narrower query"
                 );
             }
-            Ok(size)
+            if size > RESPONSE_SIZE_WARN_THRESHOLD {
+                warn!(size, "Large tool response; consider pagination");
+            }
         }
-        Err(error) => Err(error.into()),
+
+        let filepath = match (self.cache_policy, &self.data) {
+            (CachePolicy::Store(prefix), Some(data)) => {
+                context
+                    .cache
+                    .store(data, prefix, context.output_format)
+                    .await?
+            }
+            (CachePolicy::Never, _) | (CachePolicy::Store(_), None) => None,
+        };
+
+        info!(summary = %self.summary, "Datadog MCP tool succeeded");
+        let mut structured = Map::from_iter([
+            ("status".to_string(), Value::String("success".to_string())),
+            ("summary".to_string(), Value::String(self.summary)),
+            ("filepath".to_string(), json!(filepath)),
+        ]);
+        if let Some(data) = self.data {
+            structured.insert("data".to_string(), data);
+        }
+        structured.extend(self.fields);
+        let structured = Value::Object(structured);
+        let text = context.output_format.format(&structured)?;
+        let mut result = CallToolResult::structured(structured);
+        result.content = vec![ContentBlock::text(text)];
+        Ok(result)
     }
 }
 
-fn cache_allowed(prefix: &str) -> bool {
-    !matches!(
-        prefix,
-        "logs" | "users" | "security_rules" | "incidents" | "events" | "event"
-    )
-}
-
-/// Create a successful tool response with cached data
-pub async fn tool_success<T: Serialize + Formattable>(
-    data: &T,
-    prefix: &str,
-    format: OutputFormat,
-    cache_enabled: bool,
-    cache_max_bytes: u64,
-    summary: impl Into<String>,
-) -> anyhow::Result<Value> {
-    check_response_size(data, prefix)?;
-    let filepath = if cache_enabled && cache_allowed(prefix) {
-        let filepath = store_data(data, prefix, format).await?;
-        enforce_cache_size_in(&default_cache_dir(), cache_max_bytes).await?;
-        Some(filepath)
-    } else {
-        None
-    };
-    let inline_data = serde_json::to_value(data)?;
-    let summary = summary.into();
-    info!("{}", summary);
-    Ok(json!({
-        "filepath": filepath,
-        "data": inline_data,
-        "summary": summary,
-        "status": "success",
-    }))
-}
-
-/// Create a successful tool response with cached data and additional fields
-pub async fn tool_success_with_fields<T: Serialize + Formattable>(
-    data: &T,
-    prefix: &str,
-    format: OutputFormat,
-    cache_enabled: bool,
-    cache_max_bytes: u64,
-    summary: impl Into<String>,
-    additional_fields: Value,
-) -> anyhow::Result<Value> {
-    check_response_size(data, prefix)?;
-    let filepath = if cache_enabled && cache_allowed(prefix) {
-        let filepath = store_data(data, prefix, format).await?;
-        enforce_cache_size_in(&default_cache_dir(), cache_max_bytes).await?;
-        Some(filepath)
-    } else {
-        None
-    };
-    let inline_data = serde_json::to_value(data)?;
-    let summary = summary.into();
-    info!("{}", summary);
-
-    let mut response = json!({
-        "filepath": filepath,
-        "data": inline_data,
-        "summary": summary,
-        "status": "success",
-    });
-
-    // Merge additional fields
-    if let (Some(base), Some(extra)) = (response.as_object_mut(), additional_fields.as_object()) {
-        for (key, value) in extra {
-            base.insert(key.clone(), value.clone());
-        }
+pub async fn render_tool_result(
+    result: anyhow::Result<ToolOutput>,
+    context: &ToolContext,
+) -> CallToolResult {
+    match result {
+        Ok(output) => match output.into_call_result(context).await {
+            Ok(result) => result,
+            Err(error) => error_result(error, context),
+        },
+        Err(error) => error_result(error, context),
     }
-
-    Ok(response)
 }
 
-/// Create an error tool response
-pub fn tool_error(operation: &str, err: impl std::fmt::Display) -> Value {
-    let msg = format!("{}: {}", operation, err);
-    error!("{}", msg);
-    json!({
-        "error": msg,
+fn error_result(error: anyhow::Error, context: &ToolContext) -> CallToolResult {
+    error!(tool_error = %error, "Datadog MCP tool failed");
+    let structured = json!({
         "status": "error",
-    })
-}
-
-/// Create a simple success response without caching (for operations like delete)
-pub fn simple_success(summary: impl Into<String>) -> Value {
-    let summary = summary.into();
-    info!("{}", summary);
-    json!({
-        "summary": summary,
-        "status": "success",
-    })
-}
-
-/// Create a simple success response with additional fields
-pub fn simple_success_with_fields(summary: impl Into<String>, additional_fields: Value) -> Value {
-    let summary = summary.into();
-    info!("{}", summary);
-
-    let mut response = json!({
-        "summary": summary,
-        "status": "success",
+        "error": error.to_string(),
     });
-
-    if let (Some(base), Some(extra)) = (response.as_object_mut(), additional_fields.as_object()) {
-        for (key, value) in extra {
-            base.insert(key.clone(), value.clone());
-        }
-    }
-
-    response
+    let text = context
+        .output_format
+        .format(&structured)
+        .unwrap_or_else(|_| structured.to_string());
+    let mut result = CallToolResult::structured_error(structured);
+    result.content = vec![ContentBlock::text(text)];
+    result
 }
 
-/// Macro for the common tool response pattern
-///
-/// # Usage
-/// ```ignore
-/// tool_response!(result, "metrics", ctx, "Retrieved metrics data")
-/// ```
-#[macro_export]
-macro_rules! tool_response {
-    ($result:expr, $prefix:expr, $ctx:expr, $summary:expr) => {
-        match $result {
-            Ok(data) => {
-                $crate::response::tool_success(
-                    &data,
-                    $prefix,
-                    $ctx.output_format,
-                    $ctx.cache_responses,
-                    $ctx.cache_max_bytes,
-                    $summary,
-                )
-                .await
-            }
-            Err(e) => Ok($crate::response::tool_error($prefix, e)),
-        }
-    };
+pub fn simple_success(summary: impl Into<String>) -> anyhow::Result<ToolOutput> {
+    ToolOutput::without_data(summary, json!({}))
 }
 
-/// Macro for tool response with additional fields
-///
-/// # Usage
-/// ```ignore
-/// tool_response_with_fields!(result, "monitors", ctx, summary, json!({"count": 5}))
-/// ```
+pub fn simple_success_with_fields(
+    summary: impl Into<String>,
+    fields: Value,
+) -> anyhow::Result<ToolOutput> {
+    ToolOutput::without_data(summary, fields)
+}
+
 #[macro_export]
 macro_rules! tool_response_with_fields {
-    ($result:expr, $prefix:expr, $ctx:expr, $data_ident:ident, $summary:expr, $fields:block) => {
+    ($result:expr, cache($prefix:literal), $data_ident:ident, $summary:expr, $fields:block) => {
         match $result {
-            Ok($data_ident) => {
-                $crate::response::tool_success_with_fields(
-                    &$data_ident,
-                    $prefix,
-                    $ctx.output_format,
-                    $ctx.cache_responses,
-                    $ctx.cache_max_bytes,
-                    $summary,
-                    $fields,
-                )
-                .await
-            }
-            Err(e) => Ok($crate::response::tool_error($prefix, e)),
+            Ok($data_ident) => $crate::response::ToolOutput::from_data(
+                &$data_ident,
+                $summary,
+                $fields,
+                $crate::response::CachePolicy::Store($prefix),
+            ),
+            Err(error) => Err(error.into()),
+        }
+    };
+    ($result:expr, no_cache, $data_ident:ident, $summary:expr, $fields:block) => {
+        match $result {
+            Ok($data_ident) => $crate::response::ToolOutput::from_data(
+                &$data_ident,
+                $summary,
+                $fields,
+                $crate::response::CachePolicy::Never,
+            ),
+            Err(error) => Err(error.into()),
         }
     };
 }
@@ -204,52 +176,54 @@ macro_rules! tool_response_with_fields {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cache::CacheStore;
+    use crate::output::OutputFormat;
+    use datadog_api::{DatadogClient, DatadogConfig};
+    use std::sync::Arc;
 
     #[test]
-    fn test_tool_error() {
-        let result = tool_error("get_monitors", "connection failed");
-        assert_eq!(result["status"], "error");
-        assert!(result["error"].as_str().unwrap().contains("get_monitors"));
-        assert!(result["error"]
+    fn typed_output_rejects_non_object_fields() {
+        let result = ToolOutput::from_data(
+            &json!({"value": 1}),
+            "summary",
+            json!([]),
+            CachePolicy::Never,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn typed_output_rejects_reserved_fields() {
+        let result = ToolOutput::without_data("summary", json!({ "status": "created" }));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn response_size_thresholds_are_ordered() {
+        const { assert!(RESPONSE_SIZE_WARN_THRESHOLD < RESPONSE_SIZE_MAX) };
+    }
+
+    #[tokio::test]
+    async fn renderer_uses_the_configured_cache_store() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = CacheStore::new(directory.path().to_path_buf(), u64::MAX, true);
+        let client = DatadogClient::new(DatadogConfig::new("api".into(), "app".into())).unwrap();
+        let context = ToolContext::with_cache(Arc::new(client), OutputFormat::Json, cache);
+        let output = ToolOutput::from_data(
+            &json!({ "value": 1 }),
+            "cached",
+            json!({}),
+            CachePolicy::Store("configured"),
+        )
+        .unwrap();
+
+        let rendered = render_tool_result(Ok(output), &context).await;
+        let filepath = rendered.structured_content.unwrap()["filepath"]
             .as_str()
             .unwrap()
-            .contains("connection failed"));
-    }
+            .to_string();
 
-    #[test]
-    fn test_simple_success() {
-        let result = simple_success("Operation completed");
-        assert_eq!(result["status"], "success");
-        assert_eq!(result["summary"], "Operation completed");
-    }
-
-    #[test]
-    fn test_simple_success_with_fields() {
-        let result = simple_success_with_fields("Deleted monitor", json!({"monitor_id": 123}));
-        assert_eq!(result["status"], "success");
-        assert_eq!(result["summary"], "Deleted monitor");
-        assert_eq!(result["monitor_id"], 123);
-    }
-
-    #[test]
-    fn test_check_response_size_small() {
-        let data = json!({"key": "value"});
-        let size = check_response_size(&data, "test");
-        assert!(size.unwrap() < RESPONSE_SIZE_WARN_THRESHOLD);
-    }
-
-    #[test]
-    fn test_check_response_size_returns_correct_size() {
-        let data = json!({"test": "data"});
-        let size = check_response_size(&data, "test").unwrap();
-        let expected_size = serde_json::to_string(&data).unwrap().len();
-        assert_eq!(size, expected_size);
-    }
-
-    #[test]
-    fn test_response_size_thresholds() {
-        const _: () = assert!(RESPONSE_SIZE_WARN_THRESHOLD < RESPONSE_SIZE_MAX);
-        assert_eq!(RESPONSE_SIZE_WARN_THRESHOLD, 1024 * 1024);
-        assert_eq!(RESPONSE_SIZE_MAX, 10 * 1024 * 1024);
+        assert!(filepath.starts_with(directory.path().to_str().unwrap()));
+        assert!(std::path::Path::new(&filepath).is_file());
     }
 }

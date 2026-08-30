@@ -22,7 +22,7 @@ impl TracesApi {
     /// Search indexed spans using the public v2 Spans API.
     pub async fn search_spans(&self, request: &SpansSearchRequest) -> Result<SpansSearchResponse> {
         self.client
-            .post_retryable("/api/v2/spans/events/search", request)
+            .post_search("/api/v2/spans/events/search", request)
             .await
     }
 

@@ -1,16 +1,18 @@
 //! Synthetics testing tools
 
 use crate::ids::SyntheticsTestId;
+use crate::response::ToolOutput;
 use crate::sanitize::{
     sanitize_name, sanitize_optional, sanitize_tags, MAX_MESSAGE_LENGTH, MAX_NAME_LENGTH,
 };
 use crate::state::ToolContext;
 use datadog_api::models::*;
-use serde_json::{json, Value};
+use datadog_api::SyntheticsTestPatch;
+use serde_json::json;
 use std::collections::HashMap;
 use tracing::{error, info};
 
-pub async fn get_synthetics_tests(ctx: ToolContext) -> anyhow::Result<Value> {
+pub async fn get_synthetics_tests(ctx: ToolContext) -> anyhow::Result<ToolOutput> {
     info!("Getting Synthetics tests");
 
     let api = ctx.synthetics_api();
@@ -18,8 +20,7 @@ pub async fn get_synthetics_tests(ctx: ToolContext) -> anyhow::Result<Value> {
 
     tool_response_with_fields!(
         result,
-        "synthetics_tests",
-        ctx,
+        cache("synthetics_tests"),
         data,
         {
             let empty_vec = vec![];
@@ -47,14 +48,11 @@ pub async fn delete_synthetics_tests(
     ctx: ToolContext,
     test_ids: Vec<SyntheticsTestId>,
     force_delete_dependencies: Option<bool>,
-) -> anyhow::Result<Value> {
+) -> anyhow::Result<ToolOutput> {
     info!("Deleting {} Synthetics test(s)", test_ids.len());
 
     if test_ids.is_empty() {
-        return Ok(json!({
-            "error": "At least one test ID must be provided",
-            "status": "error",
-        }));
+        anyhow::bail!("At least one test ID must be provided");
     }
 
     let api = ctx.synthetics_api();
@@ -68,8 +66,7 @@ pub async fn delete_synthetics_tests(
 
     tool_response_with_fields!(
         result,
-        "synthetics_tests_deleted",
-        ctx,
+        cache("synthetics_tests_deleted"),
         data,
         {
             let deleted = data.deleted_tests.as_ref().map(|d| d.len()).unwrap_or(0);
@@ -86,7 +83,7 @@ pub async fn delete_synthetics_tests(
     )
 }
 
-pub async fn get_synthetics_locations(ctx: ToolContext) -> anyhow::Result<Value> {
+pub async fn get_synthetics_locations(ctx: ToolContext) -> anyhow::Result<ToolOutput> {
     info!("Getting Synthetics locations");
 
     let api = ctx.synthetics_api();
@@ -94,8 +91,7 @@ pub async fn get_synthetics_locations(ctx: ToolContext) -> anyhow::Result<Value>
 
     tool_response_with_fields!(
         result,
-        "synthetics_locations",
-        ctx,
+        cache("synthetics_locations"),
         data,
         {
             let public_locs: Vec<_> = data
@@ -164,7 +160,7 @@ pub async fn create_synthetics_test(
     message: Option<String>,
     tags: Option<Vec<String>>,
     tick_every: Option<i32>,
-) -> anyhow::Result<Value> {
+) -> anyhow::Result<ToolOutput> {
     let name = sanitize_name(&name);
     let message = sanitize_optional(message, MAX_MESSAGE_LENGTH);
     let tags = tags.map(sanitize_tags);
@@ -173,10 +169,7 @@ pub async fn create_synthetics_test(
 
     // Validate test_type
     if test_type != "api" {
-        return Ok(json!({
-            "error": "Only 'api' test type is currently supported",
-            "status": "error",
-        }));
+        anyhow::bail!("Only 'api' test type is currently supported");
     }
 
     // Build test request
@@ -225,8 +218,7 @@ pub async fn create_synthetics_test(
 
     tool_response_with_fields!(
         result,
-        "synthetics_test_created",
-        ctx,
+        cache("synthetics_test_created"),
         data,
         format!("Created Synthetics test: {}", data.name),
         {
@@ -234,7 +226,7 @@ pub async fn create_synthetics_test(
                 "public_id": data.public_id,
                 "name": data.name,
                 "type": data.test_type,
-                "status": data.status,
+                "test_status": data.status,
                 "url": url,
             })
         }
@@ -251,7 +243,7 @@ pub async fn update_synthetics_test(
     message: Option<String>,
     tags: Option<Vec<String>>,
     tick_every: Option<i32>,
-) -> anyhow::Result<Value> {
+) -> anyhow::Result<ToolOutput> {
     let name = sanitize_optional(name, MAX_NAME_LENGTH);
     let message = sanitize_optional(message, MAX_MESSAGE_LENGTH);
     let tags = tags.map(sanitize_tags);
@@ -267,59 +259,32 @@ pub async fn update_synthetics_test(
     })?;
 
     let mut updated_request = existing;
-    let test = updated_request
-        .as_object_mut()
-        .ok_or_else(|| anyhow::anyhow!("Datadog returned a non-object Synthetics test"))?;
-
-    if let Some(name) = name {
-        test.insert("name".to_string(), json!(name));
-    }
-    if let Some(locations) = locations {
-        test.insert("locations".to_string(), json!(locations));
-    }
-    if let Some(message) = message {
-        test.insert("message".to_string(), json!(message));
-    }
-    if let Some(tags) = tags {
-        test.insert("tags".to_string(), json!(tags));
-    }
-    if let Some(tick_every) = tick_every {
-        let options = test
-            .get_mut("options")
-            .and_then(Value::as_object_mut)
-            .ok_or_else(|| anyhow::anyhow!("Synthetics response has no options object"))?;
-        options.insert("tick_every".to_string(), json!(tick_every));
-    }
-    if let Some(url) = url {
-        let request = test
-            .get_mut("config")
-            .and_then(Value::as_object_mut)
-            .and_then(|config| config.get_mut("request"))
-            .and_then(Value::as_object_mut)
-            .ok_or_else(|| anyhow::anyhow!("Synthetics response has no config.request object"))?;
-        request.insert("url".to_string(), json!(url));
-    }
-    test.remove("public_id");
-    test.remove("created_at");
-    test.remove("modified_at");
+    updated_request.apply_patch(SyntheticsTestPatch {
+        name,
+        url,
+        locations,
+        message,
+        tags,
+        tick_every,
+    })?;
+    let updated_request = updated_request.into_update_payload();
 
     // Send the update
     let result = api.update_test(&public_id.0, &updated_request).await;
 
     tool_response_with_fields!(
         result,
-        "synthetics_test_updated",
-        ctx,
+        cache("synthetics_test_updated"),
         data,
         format!(
             "Updated Synthetics test: {}",
-            data["name"].as_str().unwrap_or("Unnamed")
+            data.name().unwrap_or("Unnamed")
         ),
         {
             json!({
-                "public_id": data["public_id"],
-                "name": data["name"],
-                "status": data["status"],
+                "public_id": data.public_id(),
+                "name": data.name(),
+                "test_status": data.status(),
             })
         }
     )
@@ -328,14 +293,11 @@ pub async fn update_synthetics_test(
 pub async fn trigger_synthetics_tests(
     ctx: ToolContext,
     test_ids: Vec<SyntheticsTestId>,
-) -> anyhow::Result<Value> {
+) -> anyhow::Result<ToolOutput> {
     info!("Triggering {} Synthetics test(s)", test_ids.len());
 
     if test_ids.is_empty() {
-        return Ok(json!({
-            "error": "At least one test ID must be provided",
-            "status": "error",
-        }));
+        anyhow::bail!("At least one test ID must be provided");
     }
 
     let api = ctx.synthetics_api();
@@ -344,8 +306,7 @@ pub async fn trigger_synthetics_tests(
 
     tool_response_with_fields!(
         result,
-        "synthetics_tests_triggered",
-        ctx,
+        cache("synthetics_tests_triggered"),
         data,
         {
             format!(

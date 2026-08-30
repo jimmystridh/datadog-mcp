@@ -32,7 +32,6 @@
 //! │  response.rs        │  Tool response helpers & macros      │
 //! │  output.rs          │  JSON/TOON output formatting         │
 //! │  cache.rs           │  Response caching to files           │
-//! │  errors.rs          │  MCP error code mapping              │
 //! └─────────────────────────────────────────────────────────────┘
 //! ```
 //!
@@ -58,7 +57,7 @@
 //!           │
 //!           ▼
 //! ┌───────────────────┐
-//! │  Response Handler │  Format (JSON/TOON), cache to file
+//! │  Response Handler │  Format JSON/TOON; cache when enabled
 //! └───────────────────┘
 //! ```
 //!
@@ -71,7 +70,6 @@
 
 // Library exports for testing and potential library use
 pub mod cache;
-pub mod errors;
 pub mod ids;
 pub mod input_validation;
 pub mod output;

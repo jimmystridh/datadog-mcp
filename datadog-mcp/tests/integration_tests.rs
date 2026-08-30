@@ -225,12 +225,13 @@ fn test_retry_config_defaults() {
 
 #[tokio::test]
 async fn test_cache_store_and_load() {
-    use datadog_mcp::cache::{init_cache_in, load_data_in, store_data_in};
+    use datadog_mcp::cache::CacheStore;
     use datadog_mcp::output::OutputFormat;
     use tempfile::TempDir;
 
     let temp_dir = TempDir::new().unwrap();
-    init_cache_in(temp_dir.path()).await.unwrap();
+    let cache = CacheStore::new(temp_dir.path().to_path_buf(), u64::MAX, true);
+    cache.initialize(24).await.unwrap();
 
     let test_data = json!({
         "test": "value",
@@ -238,33 +239,40 @@ async fn test_cache_store_and_load() {
         "array": [1, 2, 3]
     });
 
-    let filepath = store_data_in(&test_data, "test", OutputFormat::Json, temp_dir.path())
+    let filepath = cache
+        .store(&test_data, "test", OutputFormat::Json)
         .await
+        .unwrap()
         .unwrap();
     assert!(filepath.contains("test_"));
     assert!(filepath.ends_with(".json"));
 
-    let loaded = load_data_in(&filepath, temp_dir.path()).await.unwrap();
+    let loaded = cache.load(&filepath).await.unwrap();
     assert_eq!(loaded, test_data);
 }
 
 #[tokio::test]
 async fn test_cache_unique_filenames() {
-    use datadog_mcp::cache::{init_cache_in, store_data_in};
+    use datadog_mcp::cache::CacheStore;
     use datadog_mcp::output::OutputFormat;
     use tempfile::TempDir;
 
     let temp_dir = TempDir::new().unwrap();
-    init_cache_in(temp_dir.path()).await.unwrap();
+    let cache = CacheStore::new(temp_dir.path().to_path_buf(), u64::MAX, true);
+    cache.initialize(24).await.unwrap();
 
     let data1 = json!({"id": 1});
     let data2 = json!({"id": 2});
 
-    let filepath1 = store_data_in(&data1, "unique", OutputFormat::Json, temp_dir.path())
+    let filepath1 = cache
+        .store(&data1, "unique", OutputFormat::Json)
         .await
+        .unwrap()
         .unwrap();
-    let filepath2 = store_data_in(&data2, "unique", OutputFormat::Json, temp_dir.path())
+    let filepath2 = cache
+        .store(&data2, "unique", OutputFormat::Json)
         .await
+        .unwrap()
         .unwrap();
 
     assert_ne!(filepath1, filepath2);

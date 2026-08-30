@@ -1,8 +1,9 @@
 //! Log search tools
 
+use crate::response::ToolOutput;
 use crate::state::ToolContext;
 use datadog_api::models::*;
-use serde_json::{json, Value};
+use serde_json::json;
 use tracing::info;
 
 pub async fn search_logs(
@@ -12,7 +13,7 @@ pub async fn search_logs(
     to_time: String,
     limit: Option<i32>,
     cursor: Option<String>,
-) -> anyhow::Result<Value> {
+) -> anyhow::Result<ToolOutput> {
     info!(query_length = query.len(), "Searching logs");
 
     let limit = limit.unwrap_or(100);
@@ -38,8 +39,7 @@ pub async fn search_logs(
 
     tool_response_with_fields!(
         result,
-        "logs",
-        ctx,
+        no_cache,
         data,
         {
             let log_count = data.data.as_ref().map(|l| l.len()).unwrap_or(0);

@@ -1,33 +1,22 @@
 //! API validation tools
 
+use crate::response::{CachePolicy, ToolOutput};
 use crate::state::ToolContext;
-use serde_json::{json, Value};
-use tracing::{error, info};
+use serde_json::json;
+use tracing::info;
 
-pub async fn validate_api_key(ctx: ToolContext) -> anyhow::Result<Value> {
+pub async fn validate_api_key(ctx: ToolContext) -> anyhow::Result<ToolOutput> {
     info!("Validating API credentials");
 
-    let result = ctx.client.validate_keys().await;
-
-    match result {
-        Ok(_) => {
-            info!("API credentials validated successfully");
-            Ok(json!({
-                "valid": true,
-                "summary": "API credentials are valid and working",
-                "site": ctx.client.config().site,
-                "test_successful": true,
-                "status": "success",
-            }))
-        }
-        Err(e) => {
-            error!("API validation failed: {}", e);
-            Ok(json!({
-                "valid": false,
-                "error": format!("API validation failed: {}", e),
-                "site": ctx.client.config().site,
-                "status": "error",
-            }))
-        }
-    }
+    ctx.client.validate_keys().await?;
+    info!("API credentials validated successfully");
+    ToolOutput::from_data(
+        &json!({ "valid": true }),
+        "API credentials are valid and working",
+        json!({
+            "site": ctx.client.config().site,
+            "test_successful": true,
+        }),
+        CachePolicy::Never,
+    )
 }

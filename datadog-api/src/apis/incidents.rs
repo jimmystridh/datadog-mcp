@@ -1,5 +1,4 @@
-use crate::{client::DatadogClient, models::IncidentsResponse, Result};
-use serde::Serialize;
+use crate::{client::DatadogClient, models::IncidentsResponse, OffsetPage, Result};
 
 /// API client for Datadog incidents endpoints.
 pub struct IncidentsApi {
@@ -13,27 +12,7 @@ impl IncidentsApi {
         Self { client }
     }
 
-    pub async fn list_incidents(
-        &self,
-        page_size: Option<i32>,
-        page_offset: Option<i64>,
-    ) -> Result<IncidentsResponse> {
-        #[derive(Serialize)]
-        struct QueryParams {
-            #[serde(rename = "page[size]", skip_serializing_if = "Option::is_none")]
-            page_size: Option<i32>,
-            #[serde(rename = "page[offset]", skip_serializing_if = "Option::is_none")]
-            page_offset: Option<i64>,
-        }
-
-        self.client
-            .get_with_query(
-                "/api/v2/incidents",
-                &QueryParams {
-                    page_size,
-                    page_offset,
-                },
-            )
-            .await
+    pub async fn list_incidents(&self, page: OffsetPage) -> Result<IncidentsResponse> {
+        self.client.get_with_query("/api/v2/incidents", &page).await
     }
 }

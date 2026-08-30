@@ -1,5 +1,4 @@
-use crate::{client::DatadogClient, models::TeamsResponse, Result};
-use serde::Serialize;
+use crate::{client::DatadogClient, models::TeamsResponse, NumberedPage, Result};
 
 /// API client for Datadog teams endpoints.
 pub struct TeamsApi {
@@ -13,27 +12,7 @@ impl TeamsApi {
         Self { client }
     }
 
-    pub async fn list_teams(
-        &self,
-        page_number: Option<i64>,
-        page_size: Option<i64>,
-    ) -> Result<TeamsResponse> {
-        #[derive(Serialize)]
-        struct QueryParams {
-            #[serde(rename = "page[number]", skip_serializing_if = "Option::is_none")]
-            page_number: Option<i64>,
-            #[serde(rename = "page[size]", skip_serializing_if = "Option::is_none")]
-            page_size: Option<i64>,
-        }
-
-        self.client
-            .get_with_query(
-                "/api/v2/team",
-                &QueryParams {
-                    page_number,
-                    page_size,
-                },
-            )
-            .await
+    pub async fn list_teams(&self, page: NumberedPage) -> Result<TeamsResponse> {
+        self.client.get_with_query("/api/v2/team", &page).await
     }
 }

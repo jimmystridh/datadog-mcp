@@ -1,10 +1,11 @@
 //! Service Level Objectives tools
 
+use crate::response::ToolOutput;
 use crate::state::ToolContext;
-use serde_json::{json, Value};
+use serde_json::json;
 use tracing::info;
 
-pub async fn get_slos(ctx: ToolContext) -> anyhow::Result<Value> {
+pub async fn get_slos(ctx: ToolContext) -> anyhow::Result<ToolOutput> {
     info!("Getting Service Level Objectives");
 
     let api = ctx.slos_api();
@@ -12,8 +13,7 @@ pub async fn get_slos(ctx: ToolContext) -> anyhow::Result<Value> {
 
     tool_response_with_fields!(
         result,
-        "slos",
-        ctx,
+        cache("slos"),
         data,
         {
             let slos = data.data.as_ref().map(|s| s.len()).unwrap_or(0);

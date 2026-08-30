@@ -1,10 +1,11 @@
 //! Security monitoring tools
 
+use crate::response::ToolOutput;
 use crate::state::ToolContext;
-use serde_json::{json, Value};
+use serde_json::json;
 use tracing::info;
 
-pub async fn get_security_rules(ctx: ToolContext) -> anyhow::Result<Value> {
+pub async fn get_security_rules(ctx: ToolContext) -> anyhow::Result<ToolOutput> {
     info!("Getting security monitoring rules");
 
     let api = ctx.security_api();
@@ -12,8 +13,7 @@ pub async fn get_security_rules(ctx: ToolContext) -> anyhow::Result<Value> {
 
     tool_response_with_fields!(
         result,
-        "security_rules",
-        ctx,
+        no_cache,
         data,
         {
             let empty_vec = vec![];

@@ -30,6 +30,10 @@ pub enum Error {
 }
 
 impl Error {
+    pub(crate) fn is_retryable_status(status: u16) -> bool {
+        status == 408 || status == 429 || (500..600).contains(&status)
+    }
+
     /// Returns true if this is a client error (4xx status code)
     #[must_use]
     pub fn is_client_error(&self) -> bool {
@@ -79,10 +83,7 @@ impl Error {
     #[must_use]
     pub fn is_retryable(&self) -> bool {
         match self {
-            Error::ApiError { status, .. } => {
-                // 429 (rate limit), 500, 502, 503, 504 are retryable
-                *status == 429 || (500..=504).contains(status)
-            }
+            Error::ApiError { status, .. } => Self::is_retryable_status(*status),
             Error::HttpError(e) => e.is_connect() || e.is_timeout(),
             Error::RequestDeadlineExceeded(_) => true,
             _ => false,
@@ -240,6 +241,10 @@ mod tests {
 
     #[test]
     fn test_is_retryable() {
+        let request_timeout = Error::ApiError {
+            status: 408,
+            message: "Request Timeout".into(),
+        };
         let rate_limited = Error::ApiError {
             status: 429,
             message: "Rate Limited".into(),
@@ -252,6 +257,10 @@ mod tests {
             status: 502,
             message: "Bad Gateway".into(),
         };
+        let uncommon_server_error = Error::ApiError {
+            status: 599,
+            message: "Server Error".into(),
+        };
         let not_found = Error::ApiError {
             status: 404,
             message: "Not Found".into(),
@@ -261,9 +270,11 @@ mod tests {
             message: "Bad Request".into(),
         };
 
+        assert!(request_timeout.is_retryable());
         assert!(rate_limited.is_retryable());
         assert!(server_error.is_retryable());
         assert!(bad_gateway.is_retryable());
+        assert!(uncommon_server_error.is_retryable());
         assert!(!not_found.is_retryable());
         assert!(!bad_request.is_retryable());
     }

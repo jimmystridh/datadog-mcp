@@ -4,7 +4,7 @@
 //! produces equivalent values for various types.
 
 use datadog_api::{
-    CacheInfo, HttpConfig, PaginationMeta, RateLimitConfig, RetryConfig, TimestampMillis,
+    CacheInfo, HttpConfig, NumberedPage, RateLimitConfig, RetryConfig, TimestampMillis,
     TimestampNanos, TimestampSecs,
 };
 use proptest::prelude::*;
@@ -140,25 +140,10 @@ proptest! {
 
     // Pagination meta properties
     #[test]
-    fn pagination_meta_has_next_with_offset(offset in prop::option::of(0i64..10000)) {
-        let meta = PaginationMeta {
-            total_count: None,
-            total_pages: None,
-            next_offset: offset,
-            next_cursor: None,
-        };
-        prop_assert_eq!(meta.has_next(), offset.is_some());
-    }
-
-    #[test]
-    fn pagination_meta_has_next_with_cursor(cursor in prop::option::of("[a-z]{1,10}")) {
-        let meta = PaginationMeta {
-            total_count: None,
-            total_pages: None,
-            next_offset: None,
-            next_cursor: cursor.clone(),
-        };
-        prop_assert_eq!(meta.has_next(), cursor.is_some());
+    fn numbered_page_roundtrip(number in 1i64..10000, size in 1i64..=100) {
+        let page = NumberedPage::new(number, size).unwrap();
+        prop_assert_eq!(page.number(), number);
+        prop_assert_eq!(page.size(), size);
     }
 
     // Timestamp ordering property

@@ -1,8 +1,9 @@
 //! Metrics tools
 
+use crate::response::ToolOutput;
 use crate::state::ToolContext;
 use datadog_api::{models::MetricsListResponse, TimestampSecs};
-use serde_json::{json, Value};
+use serde_json::json;
 use tracing::info;
 
 pub async fn get_metrics(
@@ -10,7 +11,7 @@ pub async fn get_metrics(
     query: String,
     from_timestamp: i64,
     to_timestamp: i64,
-) -> anyhow::Result<Value> {
+) -> anyhow::Result<ToolOutput> {
     info!(query_length = query.len(), "Querying metrics");
 
     let api = ctx.metrics_api();
@@ -20,8 +21,7 @@ pub async fn get_metrics(
 
     tool_response_with_fields!(
         result,
-        "metrics",
-        ctx,
+        cache("metrics"),
         data,
         {
             let series_count = data
@@ -59,7 +59,7 @@ pub async fn search_metrics(
     ctx: ToolContext,
     query: String,
     from_timestamp: Option<i64>,
-) -> anyhow::Result<Value> {
+) -> anyhow::Result<ToolOutput> {
     info!("Searching metrics: {}", query);
 
     let from_timestamp = from_timestamp.unwrap_or_else(|| TimestampSecs::now().0 - 86_400);
@@ -79,8 +79,7 @@ pub async fn search_metrics(
 
     tool_response_with_fields!(
         result,
-        "metrics_search",
-        ctx,
+        cache("metrics_search"),
         data,
         {
             let metric_count = data.metrics.as_ref().map(|m| m.len()).unwrap_or(0);
@@ -98,7 +97,10 @@ pub async fn search_metrics(
     )
 }
 
-pub async fn get_metric_metadata(ctx: ToolContext, metric_name: String) -> anyhow::Result<Value> {
+pub async fn get_metric_metadata(
+    ctx: ToolContext,
+    metric_name: String,
+) -> anyhow::Result<ToolOutput> {
     info!("Getting metadata for metric: {}", metric_name);
 
     let api = ctx.metrics_api();
@@ -106,8 +108,7 @@ pub async fn get_metric_metadata(ctx: ToolContext, metric_name: String) -> anyho
 
     tool_response_with_fields!(
         result,
-        "metric_metadata",
-        ctx,
+        cache("metric_metadata"),
         data,
         format!("Retrieved metadata for metric: {}", metric_name),
         {

@@ -1,7 +1,9 @@
 //! Incident management tools
 
+use crate::response::ToolOutput;
 use crate::state::ToolContext;
-use serde_json::{json, Value};
+use datadog_api::OffsetPage;
+use serde_json::json;
 use std::collections::HashMap;
 use tracing::info;
 
@@ -9,24 +11,17 @@ pub async fn get_incidents(
     ctx: ToolContext,
     page_size: Option<i32>,
     page_offset: Option<i64>,
-) -> anyhow::Result<Value> {
+) -> anyhow::Result<ToolOutput> {
     info!("Getting incidents");
 
-    let page_size = page_size.unwrap_or(25);
-    if !(1..=100).contains(&page_size) {
-        anyhow::bail!("Incident page size must be between 1 and 100");
-    }
-    if page_offset.is_some_and(|offset| offset < 0) {
-        anyhow::bail!("Incident page offset cannot be negative");
-    }
+    let page = OffsetPage::new(page_size.unwrap_or(25), page_offset)?;
 
     let api = ctx.incidents_api();
-    let result = api.list_incidents(Some(page_size), page_offset).await;
+    let result = api.list_incidents(page).await;
 
     tool_response_with_fields!(
         result,
-        "incidents",
-        ctx,
+        no_cache,
         data,
         format!(
             "Retrieved {} incidents",

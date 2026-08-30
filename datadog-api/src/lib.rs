@@ -13,7 +13,7 @@
 //! │  ├─ DatadogConfig   │  API keys, site, retry settings      │
 //! │  └─ SecretString    │  Zeroize-on-drop credential wrapper  │
 //! ├─────────────────────────────────────────────────────────────┤
-//! │  client.rs          │  HTTP client with middleware         │
+//! │  client.rs          │  HTTP client and request policy      │
 //! │  └─ DatadogClient   │  Retry logic, auth headers, gzip     │
 //! ├─────────────────────────────────────────────────────────────┤
 //! │  apis/              │  Domain-specific API modules         │
@@ -61,9 +61,9 @@
 //! ## Configuration Sources
 //!
 //! Credentials load from (in order):
-//! 1. **File**: `~/.datadog-mcp/credentials.json`
+//! 1. **Environment**: `DD_API_KEY`, `DD_APP_KEY`, `DD_SITE`
 //! 2. **Keyring**: System credential storage (requires `keyring` feature)
-//! 3. **Environment**: `DD_API_KEY`, `DD_APP_KEY`, `DD_SITE`
+//! 3. **File**: `~/.datadog-mcp/credentials.json`
 //!
 //! Use `DatadogConfig::from_env_or_file()` to try all sources.
 //!
@@ -85,7 +85,10 @@
 //! - US5: `us5.datadoghq.com`
 //! - EU: `datadoghq.eu`
 //! - AP1: `ap1.datadoghq.com`
+//! - AP2: `ap2.datadoghq.com`
+//! - UK1: `uk1.datadoghq.com`
 //! - US1-FED: `ddog-gov.com`
+//! - US2-FED: `us2.ddog-gov.com`
 //!
 //! ## Cargo Features
 //!
@@ -98,6 +101,7 @@ pub mod error;
 pub mod models;
 pub mod pagination;
 pub mod rate_limit;
+pub mod resource_documents;
 pub mod timestamp;
 
 pub use client::{CacheInfo, CachedResponse, DatadogClient};
@@ -108,6 +112,9 @@ pub use models::{
     TemplateVariable, TimeseriesDefinition, ToplistDefinition, Widget, WidgetDefinition,
     WidgetLayout,
 };
-pub use pagination::{CursorParams, PageParams, PaginatedResponse, PaginationMeta};
+pub use pagination::{NumberedPage, OffsetPage};
 pub use rate_limit::{RateLimitConfig, RateLimiter};
+pub use resource_documents::{
+    DashboardDocument, DashboardPatch, SyntheticsTestDocument, SyntheticsTestPatch,
+};
 pub use timestamp::{TimestampMillis, TimestampNanos, TimestampSecs};

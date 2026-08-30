@@ -3,7 +3,7 @@
 use crate::input_validation::{
     validate_monitor_name, validate_monitor_query, validate_monitor_type,
 };
-use crate::response::{simple_success_with_fields, tool_error};
+use crate::response::{simple_success_with_fields, ToolOutput};
 use crate::sanitize::{
     sanitize_name, sanitize_optional, sanitize_query, MAX_MESSAGE_LENGTH, MAX_NAME_LENGTH,
     MAX_QUERY_LENGTH,
@@ -11,11 +11,11 @@ use crate::sanitize::{
 use crate::state::ToolContext;
 use crate::tool_inputs::{MonitorId, MonitorOptions};
 use datadog_api::models::*;
-use serde_json::{json, Value};
+use serde_json::json;
 use std::collections::HashMap;
 use tracing::info;
 
-pub async fn get_monitors(ctx: ToolContext) -> anyhow::Result<Value> {
+pub async fn get_monitors(ctx: ToolContext) -> anyhow::Result<ToolOutput> {
     info!("Getting all monitors");
 
     let api = ctx.monitors_api();
@@ -23,8 +23,7 @@ pub async fn get_monitors(ctx: ToolContext) -> anyhow::Result<Value> {
 
     tool_response_with_fields!(
         result,
-        "monitors",
-        ctx,
+        cache("monitors"),
         data,
         format!("Retrieved {} monitors", data.len()),
         {
@@ -49,12 +48,12 @@ pub async fn search_monitors(
     page: Option<i64>,
     per_page: Option<i64>,
     sort: Option<String>,
-) -> anyhow::Result<Value> {
+) -> anyhow::Result<ToolOutput> {
     let query = sanitize_query(&query);
     let sort = sanitize_optional(sort, MAX_NAME_LENGTH);
 
     if let Err(e) = validate_monitor_query(&query) {
-        return Ok(tool_error("search_monitors", e));
+        return Err(e.into());
     }
 
     info!("Searching monitors: {}", query);
@@ -66,8 +65,7 @@ pub async fn search_monitors(
 
     tool_response_with_fields!(
         result,
-        "monitors_search",
-        ctx,
+        cache("monitors_search"),
         data,
         {
             let returned = data.monitors.as_ref().map(|m| m.len()).unwrap_or(0);
@@ -97,7 +95,7 @@ pub async fn search_monitors(
     )
 }
 
-pub async fn get_monitor(ctx: ToolContext, monitor_id: MonitorId) -> anyhow::Result<Value> {
+pub async fn get_monitor(ctx: ToolContext, monitor_id: MonitorId) -> anyhow::Result<ToolOutput> {
     info!("Getting monitor: {}", monitor_id.0);
 
     let api = ctx.monitors_api();
@@ -105,8 +103,7 @@ pub async fn get_monitor(ctx: ToolContext, monitor_id: MonitorId) -> anyhow::Res
 
     tool_response_with_fields!(
         result,
-        "monitor",
-        ctx,
+        cache("monitor"),
         data,
         {
             format!(
@@ -128,7 +125,7 @@ pub async fn get_monitor(ctx: ToolContext, monitor_id: MonitorId) -> anyhow::Res
             json!({
                 "monitor_id": data.id,
                 "monitor_name": data.name,
-                "status": status,
+                "monitor_status": status,
                 "monitor_type": data.monitor_type,
             })
         }
@@ -143,20 +140,20 @@ pub async fn create_monitor(
     message: Option<String>,
     tags: Option<Vec<String>>,
     options: Option<MonitorOptions>,
-) -> anyhow::Result<Value> {
+) -> anyhow::Result<ToolOutput> {
     let name = sanitize_name(&name);
     let query = sanitize_query(&query);
     let message = sanitize_optional(message, MAX_MESSAGE_LENGTH);
 
     // Validate inputs
     if let Err(e) = validate_monitor_name(&name) {
-        return Ok(tool_error("create_monitor", e));
+        return Err(e.into());
     }
     if let Err(e) = validate_monitor_type(&monitor_type) {
-        return Ok(tool_error("create_monitor", e));
+        return Err(e.into());
     }
     if let Err(e) = validate_monitor_query(&query) {
-        return Ok(tool_error("create_monitor", e));
+        return Err(e.into());
     }
 
     info!("Creating monitor: {}", name);
@@ -175,15 +172,14 @@ pub async fn create_monitor(
 
     tool_response_with_fields!(
         result,
-        "monitor_created",
-        ctx,
+        cache("monitor_created"),
         data,
         format!("Created monitor: {} (ID: {:?})", name, data.id),
         {
             json!({
                 "monitor_id": data.id,
                 "monitor_name": data.name,
-                "status": "created",
+                "operation_status": "created",
             })
         }
     )
@@ -197,7 +193,7 @@ pub async fn update_monitor(
     message: Option<String>,
     tags: Option<Vec<String>>,
     options: Option<MonitorOptions>,
-) -> anyhow::Result<Value> {
+) -> anyhow::Result<ToolOutput> {
     let name = sanitize_optional(name, MAX_NAME_LENGTH);
     let query = sanitize_optional(query, MAX_QUERY_LENGTH);
     let message = sanitize_optional(message, MAX_MESSAGE_LENGTH);
@@ -217,37 +213,30 @@ pub async fn update_monitor(
 
     tool_response_with_fields!(
         result,
-        "monitor_updated",
-        ctx,
+        cache("monitor_updated"),
         data,
         format!("Updated monitor: {:?} (ID: {:?})", data.name, data.id),
         {
             json!({
                 "monitor_id": data.id,
                 "monitor_name": data.name,
-                "status": "updated",
+                "operation_status": "updated",
             })
         }
     )
 }
 
-pub async fn delete_monitor(ctx: ToolContext, monitor_id: MonitorId) -> anyhow::Result<Value> {
+pub async fn delete_monitor(ctx: ToolContext, monitor_id: MonitorId) -> anyhow::Result<ToolOutput> {
     info!("Deleting monitor: {}", monitor_id.0);
 
     let api = ctx.monitors_api();
-    let result = api.delete_monitor(monitor_id.0).await;
-
-    match result {
-        Ok(_) => {
-            info!("Successfully deleted monitor ID: {}", monitor_id);
-            Ok(simple_success_with_fields(
-                format!("Successfully deleted monitor ID: {}", monitor_id),
-                json!({
-                    "monitor_id": monitor_id,
-                    "status": "deleted",
-                }),
-            ))
-        }
-        Err(e) => Ok(tool_error("Failed to delete monitor", e)),
-    }
+    api.delete_monitor(monitor_id.0).await?;
+    info!("Successfully deleted monitor ID: {}", monitor_id);
+    simple_success_with_fields(
+        format!("Successfully deleted monitor ID: {}", monitor_id),
+        json!({
+            "monitor_id": monitor_id,
+            "operation_status": "deleted",
+        }),
+    )
 }

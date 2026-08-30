@@ -1,5 +1,4 @@
-use crate::{client::DatadogClient, models::UsersV2Response, Result};
-use serde::Serialize;
+use crate::{client::DatadogClient, models::UsersV2Response, NumberedPage, Result};
 
 /// API client for Datadog users endpoints.
 pub struct UsersApi {
@@ -13,27 +12,7 @@ impl UsersApi {
         Self { client }
     }
 
-    pub async fn list_users(
-        &self,
-        page_number: Option<i64>,
-        page_size: Option<i64>,
-    ) -> Result<UsersV2Response> {
-        #[derive(Serialize)]
-        struct QueryParams {
-            #[serde(rename = "page[number]", skip_serializing_if = "Option::is_none")]
-            page_number: Option<i64>,
-            #[serde(rename = "page[size]", skip_serializing_if = "Option::is_none")]
-            page_size: Option<i64>,
-        }
-
-        self.client
-            .get_with_query(
-                "/api/v2/users",
-                &QueryParams {
-                    page_number,
-                    page_size,
-                },
-            )
-            .await
+    pub async fn list_users(&self, page: NumberedPage) -> Result<UsersV2Response> {
+        self.client.get_with_query("/api/v2/users", &page).await
     }
 }

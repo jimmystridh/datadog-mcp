@@ -1,29 +1,26 @@
 //! User tools
 
+use crate::response::ToolOutput;
 use crate::state::ToolContext;
-use serde_json::{json, Value};
+use datadog_api::NumberedPage;
+use serde_json::json;
 use tracing::info;
 
 pub async fn get_users(
     ctx: ToolContext,
     page_number: Option<i64>,
     page_size: Option<i64>,
-) -> anyhow::Result<Value> {
+) -> anyhow::Result<ToolOutput> {
     info!("Getting users");
 
-    let page_number = page_number.unwrap_or(1);
-    let page_size = page_size.unwrap_or(100);
-    if page_number < 1 || !(1..=100).contains(&page_size) {
-        anyhow::bail!("User page number must be positive and page size must be between 1 and 100");
-    }
+    let page = NumberedPage::new(page_number.unwrap_or(1), page_size.unwrap_or(100))?;
 
     let api = ctx.users_api();
-    let result = api.list_users(Some(page_number), Some(page_size)).await;
+    let result = api.list_users(page).await;
 
     tool_response_with_fields!(
         result,
-        "users",
-        ctx,
+        no_cache,
         data,
         {
             let users = data.data.as_ref().map(|u| u.len()).unwrap_or(0);
@@ -33,8 +30,8 @@ pub async fn get_users(
             let users = data.data.as_ref().map(|u| u.len()).unwrap_or(0);
             json!({
                 "total_users": users,
-                "page_number": page_number,
-                "page_size": page_size,
+                "page_number": page.number(),
+                "page_size": page.size(),
             })
         }
     )

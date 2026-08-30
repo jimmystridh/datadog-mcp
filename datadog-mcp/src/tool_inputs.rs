@@ -241,18 +241,10 @@ pub struct GetIncidentsInput {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct GetTeamsInput {
+pub struct DirectoryPageInput {
     #[schemars(description = "One-based page number")]
     pub page_number: Option<i64>,
-    #[schemars(description = "Number of teams per page (1-100)")]
-    pub page_size: Option<i64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct GetUsersInput {
-    #[schemars(description = "One-based page number")]
-    pub page_number: Option<i64>,
-    #[schemars(description = "Number of users per page (1-100)")]
+    #[schemars(description = "Number of entries per page (1-100)")]
     pub page_size: Option<i64>,
 }
 

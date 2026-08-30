@@ -1,10 +1,11 @@
 //! Notebook tools
 
+use crate::response::ToolOutput;
 use crate::state::ToolContext;
-use serde_json::{json, Value};
+use serde_json::json;
 use tracing::info;
 
-pub async fn get_notebooks(ctx: ToolContext) -> anyhow::Result<Value> {
+pub async fn get_notebooks(ctx: ToolContext) -> anyhow::Result<ToolOutput> {
     info!("Getting Datadog notebooks");
 
     let api = ctx.notebooks_api();
@@ -12,8 +13,7 @@ pub async fn get_notebooks(ctx: ToolContext) -> anyhow::Result<Value> {
 
     tool_response_with_fields!(
         result,
-        "notebooks",
-        ctx,
+        cache("notebooks"),
         data,
         {
             let notebooks = data.data.as_ref().map(|n| n.len()).unwrap_or(0);

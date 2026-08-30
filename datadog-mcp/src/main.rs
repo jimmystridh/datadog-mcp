@@ -7,17 +7,17 @@
 use anyhow::Result;
 use clap::Parser;
 use datadog_mcp::{
-    cache,
+    cache::{default_cache_dir, CacheStore},
     output::OutputFormat,
     server::DatadogMcpServer,
-    state::{ServerOptions, ServerState},
+    state::{AccessMode, ServerOptions, ServerState},
 };
 use rmcp::{transport::stdio, ServiceExt};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser, Debug)]
-#[command(name = "datadog-mcp")]
+#[command(name = "datadog-mcp", version)]
 #[command(about = "Datadog MCP Server - Model Context Protocol server for Datadog API", long_about = None)]
 struct Args {
     /// Output format for MCP responses (json or toon)
@@ -90,19 +90,17 @@ async fn main() -> Result<()> {
     let config = datadog_api::config::DatadogConfig::from_env_or_file()?;
     info!("Loaded Datadog configuration for site: {}", config.site);
 
-    let cache_dir = cache::default_cache_dir();
-    if args.cache_responses {
-        cache::init_cache_in(&cache_dir).await?;
-        let deleted = cache::cleanup_cache_in(&cache_dir, args.cache_retention_hours).await?;
-        let size_deleted = cache::enforce_cache_size_in(
-            &cache_dir,
-            args.cache_max_mib.saturating_mul(1024 * 1024),
-        )
-        .await?;
+    let cache = CacheStore::new(
+        default_cache_dir(),
+        args.cache_max_mib.saturating_mul(1024 * 1024),
+        args.cache_responses,
+    );
+    let maintenance = cache.initialize(args.cache_retention_hours).await?;
+    if cache.writes_enabled() {
         info!(
-            cache_directory = %cache_dir.display(),
-            retention_deleted = deleted,
-            size_deleted,
+            cache_directory = %cache.root().display(),
+            retention_deleted = maintenance.retention_deleted,
+            size_deleted = maintenance.size_deleted,
             "Response cache enabled and retention applied"
         );
     }
@@ -117,21 +115,19 @@ async fn main() -> Result<()> {
         config,
         args.format,
         ServerOptions {
-            allow_write: args.allow_write,
-            cache_responses: args.cache_responses,
-            cache_dir,
-            cache_max_bytes: args.cache_max_mib.saturating_mul(1024 * 1024),
+            access_mode: if args.allow_write {
+                AccessMode::ReadWrite
+            } else {
+                AccessMode::ReadOnly
+            },
+            cache,
         },
-    )
-    .await?;
+    )?;
     info!("Server state initialized");
 
     // Test connection to Datadog
     match state.test_connection().await {
-        Ok(_) => info!(
-            "Successfully connected to Datadog at: {}",
-            state.config.site
-        ),
+        Ok(_) => info!("Successfully connected to Datadog at: {}", state.site()),
         Err(e) => info!(
             "Could not verify connection to Datadog: {}. Server will start anyway, tools may fail.",
             e

@@ -12,15 +12,95 @@
 use anyhow::Result;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::fs;
 use uuid::Uuid;
 
-use crate::output::{Formattable, OutputFormat};
+use crate::output::OutputFormat;
 
 const CACHE_DIR_NAME: &str = "datadog-mcp";
 const LEGACY_CACHE_DIR: &str = "datadog_cache";
 pub const MAX_CACHE_READ_BYTES: u64 = 10 * 1024 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CacheMaintenance {
+    pub retention_deleted: usize,
+    pub size_deleted: usize,
+}
+
+#[derive(Debug)]
+struct CacheStoreInner {
+    root: PathBuf,
+    max_bytes: u64,
+    writes_enabled: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct CacheStore(Arc<CacheStoreInner>);
+
+impl CacheStore {
+    pub fn new(root: PathBuf, max_bytes: u64, writes_enabled: bool) -> Self {
+        Self(Arc::new(CacheStoreInner {
+            root,
+            max_bytes,
+            writes_enabled,
+        }))
+    }
+
+    pub fn disabled() -> Self {
+        Self::new(default_cache_dir(), 100 * 1024 * 1024, false)
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.0.root
+    }
+
+    pub fn writes_enabled(&self) -> bool {
+        self.0.writes_enabled
+    }
+
+    pub async fn initialize(&self, retention_hours: u64) -> Result<CacheMaintenance> {
+        if !self.writes_enabled() {
+            return Ok(CacheMaintenance {
+                retention_deleted: 0,
+                size_deleted: 0,
+            });
+        }
+
+        init_cache_in(self.root()).await?;
+        let retention_deleted = cleanup_cache_in(self.root(), retention_hours).await?;
+        let size_deleted = enforce_cache_size_in(self.root(), self.0.max_bytes).await?;
+        Ok(CacheMaintenance {
+            retention_deleted,
+            size_deleted,
+        })
+    }
+
+    pub async fn store<T: Serialize>(
+        &self,
+        data: &T,
+        prefix: &str,
+        format: OutputFormat,
+    ) -> Result<Option<String>> {
+        if !self.writes_enabled() {
+            return Ok(None);
+        }
+
+        init_cache_in(self.root()).await?;
+        let filepath = store_data_in(data, prefix, format, self.root()).await?;
+        enforce_cache_size_in(self.root(), self.0.max_bytes).await?;
+        Ok(Some(filepath))
+    }
+
+    pub async fn cleanup(&self, older_than_hours: u64) -> Result<usize> {
+        cleanup_cache_in(self.root(), older_than_hours).await
+    }
+
+    pub async fn load(&self, filepath: &str) -> Result<serde_json::Value> {
+        load_data_in(filepath, self.root()).await
+    }
+}
 
 fn unix_timestamp() -> Result<i64> {
     Ok(i64::try_from(
@@ -57,26 +137,7 @@ pub fn default_cache_dir() -> PathBuf {
     PathBuf::from(LEGACY_CACHE_DIR)
 }
 
-pub async fn init_cache() -> Result<PathBuf> {
-    // Try OS-appropriate cache; if creation fails, fall back to legacy relative dir
-    let preferred = default_cache_dir();
-    match init_cache_in(&preferred).await {
-        Ok(path) => Ok(path),
-        Err(e) => {
-            tracing::warn!(
-                "Failed to create cache at {}: {}. Falling back to ./{}",
-                preferred.display(),
-                e,
-                LEGACY_CACHE_DIR
-            );
-            let fallback = PathBuf::from(LEGACY_CACHE_DIR);
-            init_cache_in(&fallback).await?;
-            Ok(fallback)
-        }
-    }
-}
-
-pub async fn init_cache_in(dir: impl AsRef<Path>) -> Result<PathBuf> {
+async fn init_cache_in(dir: impl AsRef<Path>) -> Result<PathBuf> {
     let cache_path = dir.as_ref().to_path_buf();
     fs::create_dir_all(&cache_path).await?;
     #[cfg(unix)]
@@ -87,16 +148,7 @@ pub async fn init_cache_in(dir: impl AsRef<Path>) -> Result<PathBuf> {
     Ok(cache_path)
 }
 
-pub async fn store_data<T: Serialize + Formattable>(
-    data: &T,
-    prefix: &str,
-    format: OutputFormat,
-) -> Result<String> {
-    let dir = init_cache().await?;
-    store_data_in(data, prefix, format, dir).await
-}
-
-pub async fn store_data_in<T: Serialize + Formattable>(
+async fn store_data_in<T: Serialize>(
     data: &T,
     prefix: &str,
     format: OutputFormat,
@@ -114,7 +166,7 @@ pub async fn store_data_in<T: Serialize + Formattable>(
     let cache_path = dir.as_ref().to_path_buf();
     let filepath = cache_path.join(&filename);
 
-    let content = data.format(format)?;
+    let content = format.format(data)?;
     fs::write(&filepath, &content).await?;
 
     // Set restrictive permissions (0600) on Unix systems
@@ -128,7 +180,7 @@ pub async fn store_data_in<T: Serialize + Formattable>(
     Ok(filepath.to_string_lossy().to_string())
 }
 
-pub async fn cleanup_cache_in(cache_path: &Path, older_than_hours: u64) -> Result<usize> {
+async fn cleanup_cache_in(cache_path: &Path, older_than_hours: u64) -> Result<usize> {
     if !cache_path.exists() {
         return Ok(0);
     }
@@ -165,11 +217,7 @@ pub async fn cleanup_cache_in(cache_path: &Path, older_than_hours: u64) -> Resul
     Ok(deleted_count)
 }
 
-pub async fn cleanup_cache(older_than_hours: u64) -> Result<usize> {
-    cleanup_cache_in(&default_cache_dir(), older_than_hours).await
-}
-
-pub async fn enforce_cache_size_in(cache_path: &Path, max_bytes: u64) -> Result<usize> {
+async fn enforce_cache_size_in(cache_path: &Path, max_bytes: u64) -> Result<usize> {
     if !cache_path.exists() {
         return Ok(0);
     }
@@ -207,10 +255,7 @@ pub async fn enforce_cache_size_in(cache_path: &Path, max_bytes: u64) -> Result<
     Ok(deleted)
 }
 
-pub async fn load_data_in(
-    filepath: &str,
-    cache_dir: impl AsRef<Path>,
-) -> Result<serde_json::Value> {
+async fn load_data_in(filepath: &str, cache_dir: impl AsRef<Path>) -> Result<serde_json::Value> {
     let cache_root = fs::canonicalize(cache_dir.as_ref()).await?;
     let path = fs::canonicalize(filepath).await?;
     if !path.starts_with(&cache_root) {
@@ -254,10 +299,6 @@ pub async fn load_data_in(
     };
 
     Ok(data)
-}
-
-pub async fn load_data(filepath: &str) -> Result<serde_json::Value> {
-    load_data_in(filepath, default_cache_dir()).await
 }
 
 #[cfg(test)]

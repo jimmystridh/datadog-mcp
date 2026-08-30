@@ -1,5 +1,4 @@
-use crate::{client::DatadogClient, models::DashboardListResponse, Result};
-use serde_json::Value;
+use crate::{client::DatadogClient, models::DashboardListResponse, DashboardDocument, Result};
 
 /// API client for Datadog dashboards endpoints.
 pub struct DashboardsApi {
@@ -17,16 +16,23 @@ impl DashboardsApi {
         self.client.get("/api/v1/dashboard").await
     }
 
-    pub async fn get_dashboard(&self, dashboard_id: &str) -> Result<Value> {
+    pub async fn get_dashboard(&self, dashboard_id: &str) -> Result<DashboardDocument> {
         let endpoint = format!("/api/v1/dashboard/{}", dashboard_id);
         self.client.get(&endpoint).await
     }
 
-    pub async fn create_dashboard(&self, dashboard: &Value) -> Result<Value> {
+    pub async fn create_dashboard(
+        &self,
+        dashboard: &DashboardDocument,
+    ) -> Result<DashboardDocument> {
         self.client.post("/api/v1/dashboard", dashboard).await
     }
 
-    pub async fn update_dashboard(&self, dashboard_id: &str, dashboard: &Value) -> Result<Value> {
+    pub async fn update_dashboard(
+        &self,
+        dashboard_id: &str,
+        dashboard: &DashboardDocument,
+    ) -> Result<DashboardDocument> {
         let endpoint = format!("/api/v1/dashboard/{}", dashboard_id);
         self.client.put(&endpoint, dashboard).await
     }

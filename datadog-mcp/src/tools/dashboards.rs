@@ -2,13 +2,14 @@
 
 use crate::ids::DashboardId;
 use crate::input_validation::{validate_dashboard_layout, validate_dashboard_title};
-use crate::response::{simple_success_with_fields, tool_error};
+use crate::response::{simple_success_with_fields, ToolOutput};
 use crate::sanitize::{sanitize_name, sanitize_optional, MAX_MESSAGE_LENGTH, MAX_NAME_LENGTH};
 use crate::state::ToolContext;
+use datadog_api::{DashboardDocument, DashboardPatch};
 use serde_json::{json, Value};
 use tracing::info;
 
-pub async fn get_dashboards(ctx: ToolContext) -> anyhow::Result<Value> {
+pub async fn get_dashboards(ctx: ToolContext) -> anyhow::Result<ToolOutput> {
     info!("Getting all dashboards");
 
     let api = ctx.dashboards_api();
@@ -16,8 +17,7 @@ pub async fn get_dashboards(ctx: ToolContext) -> anyhow::Result<Value> {
 
     tool_response_with_fields!(
         result,
-        "dashboards",
-        ctx,
+        cache("dashboards"),
         data,
         {
             let dashboard_count = data.dashboards.as_ref().map(|d| d.len()).unwrap_or(0);
@@ -38,7 +38,10 @@ pub async fn get_dashboards(ctx: ToolContext) -> anyhow::Result<Value> {
     )
 }
 
-pub async fn get_dashboard(ctx: ToolContext, dashboard_id: DashboardId) -> anyhow::Result<Value> {
+pub async fn get_dashboard(
+    ctx: ToolContext,
+    dashboard_id: DashboardId,
+) -> anyhow::Result<ToolOutput> {
     info!("Getting dashboard: {}", dashboard_id);
 
     let api = ctx.dashboards_api();
@@ -46,24 +49,21 @@ pub async fn get_dashboard(ctx: ToolContext, dashboard_id: DashboardId) -> anyho
 
     tool_response_with_fields!(
         result,
-        "dashboard",
-        ctx,
+        cache("dashboard"),
         data,
         {
-            let widgets = data["widgets"].as_array().map_or(0, Vec::len);
             format!(
                 "Dashboard: {} with {} widgets",
-                data["title"].as_str().unwrap_or("Untitled"),
-                widgets
+                data.title().unwrap_or("Untitled"),
+                data.widget_count()
             )
         },
         {
-            let widgets = data["widgets"].as_array().map_or(0, Vec::len);
             json!({
-                "dashboard_id": data["id"],
-                "dashboard_title": data["title"],
-                "widget_count": widgets,
-                "layout_type": data["layout_type"],
+                "dashboard_id": data.id(),
+                "dashboard_title": data.title(),
+                "widget_count": data.widget_count(),
+                "layout_type": data.layout_type(),
             })
         }
     )
@@ -75,44 +75,35 @@ pub async fn create_dashboard(
     layout_type: String,
     widgets: Vec<Value>,
     description: Option<String>,
-) -> anyhow::Result<Value> {
+) -> anyhow::Result<ToolOutput> {
     let title = sanitize_name(&title);
     let description = sanitize_optional(description, MAX_MESSAGE_LENGTH);
 
     // Validate inputs
     if let Err(e) = validate_dashboard_title(&title) {
-        return Ok(tool_error("create_dashboard", e));
+        return Err(e.into());
     }
     if let Err(e) = validate_dashboard_layout(&layout_type) {
-        return Ok(tool_error("create_dashboard", e));
+        return Err(e.into());
     }
 
     info!("Creating dashboard: {}", title);
 
-    let dashboard = json!({
-        "title": title,
-        "description": description,
-        "widgets": widgets,
-        "layout_type": layout_type,
-    });
+    let dashboard = DashboardDocument::new(title, layout_type, widgets, description);
 
     let api = ctx.dashboards_api();
     let result = api.create_dashboard(&dashboard).await;
 
     tool_response_with_fields!(
         result,
-        "dashboard_created",
-        ctx,
+        cache("dashboard_created"),
         data,
-        format!(
-            "Created dashboard: {}",
-            data["title"].as_str().unwrap_or("Untitled")
-        ),
+        format!("Created dashboard: {}", data.title().unwrap_or("Untitled")),
         {
             json!({
-                "dashboard_id": data["id"],
-                "dashboard_title": data["title"],
-                "status": "created",
+                "dashboard_id": data.id(),
+                "dashboard_title": data.title(),
+                "operation_status": "created",
             })
         }
     )
@@ -123,7 +114,7 @@ pub async fn update_dashboard(
     dashboard_id: DashboardId,
     title: Option<String>,
     widgets: Option<Vec<Value>>,
-) -> anyhow::Result<Value> {
+) -> anyhow::Result<ToolOutput> {
     let title = sanitize_optional(title, MAX_NAME_LENGTH);
 
     info!("Updating dashboard: {}", dashboard_id);
@@ -134,20 +125,8 @@ pub async fn update_dashboard(
     let existing = api.get_dashboard(&dashboard_id.0).await?;
 
     let mut updated_dashboard = existing;
-    let dashboard = updated_dashboard
-        .as_object_mut()
-        .ok_or_else(|| anyhow::anyhow!("Datadog returned a non-object dashboard"))?;
-    if let Some(title) = title {
-        dashboard.insert("title".to_string(), json!(title));
-    }
-    if let Some(widgets) = widgets {
-        dashboard.insert("widgets".to_string(), json!(widgets));
-    }
-    dashboard.remove("id");
-    dashboard.remove("author_handle");
-    dashboard.remove("created_at");
-    dashboard.remove("modified_at");
-    dashboard.remove("url");
+    updated_dashboard.apply_patch(DashboardPatch { title, widgets });
+    let updated_dashboard = updated_dashboard.into_update_payload();
 
     let result = api
         .update_dashboard(&dashboard_id.0, &updated_dashboard)
@@ -155,18 +134,14 @@ pub async fn update_dashboard(
 
     tool_response_with_fields!(
         result,
-        "dashboard_updated",
-        ctx,
+        cache("dashboard_updated"),
         data,
-        format!(
-            "Updated dashboard: {}",
-            data["title"].as_str().unwrap_or("Untitled")
-        ),
+        format!("Updated dashboard: {}", data.title().unwrap_or("Untitled")),
         {
             json!({
-                "dashboard_id": data["id"],
-                "dashboard_title": data["title"],
-                "status": "updated",
+                "dashboard_id": data.id(),
+                "dashboard_title": data.title(),
+                "operation_status": "updated",
             })
         }
     )
@@ -175,23 +150,17 @@ pub async fn update_dashboard(
 pub async fn delete_dashboard(
     ctx: ToolContext,
     dashboard_id: DashboardId,
-) -> anyhow::Result<Value> {
+) -> anyhow::Result<ToolOutput> {
     info!("Deleting dashboard: {}", dashboard_id);
 
     let api = ctx.dashboards_api();
-    let result = api.delete_dashboard(&dashboard_id.0).await;
-
-    match result {
-        Ok(_) => {
-            info!("Successfully deleted dashboard ID: {}", dashboard_id);
-            Ok(simple_success_with_fields(
-                format!("Successfully deleted dashboard ID: {}", dashboard_id),
-                json!({
-                    "dashboard_id": dashboard_id,
-                    "status": "deleted",
-                }),
-            ))
-        }
-        Err(e) => Ok(tool_error("Failed to delete dashboard", e)),
-    }
+    api.delete_dashboard(&dashboard_id.0).await?;
+    info!("Successfully deleted dashboard ID: {}", dashboard_id);
+    simple_success_with_fields(
+        format!("Successfully deleted dashboard ID: {}", dashboard_id),
+        json!({
+            "dashboard_id": dashboard_id,
+            "operation_status": "deleted",
+        }),
+    )
 }

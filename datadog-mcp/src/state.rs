@@ -13,36 +13,39 @@ use datadog_api::{
     },
     DatadogClient, DatadogConfig,
 };
-use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::cache::CacheStore;
 use crate::output::OutputFormat;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccessMode {
+    ReadOnly,
+    ReadWrite,
+}
+
+impl AccessMode {
+    pub const fn allows_writes(self) -> bool {
+        matches!(self, Self::ReadWrite)
+    }
+}
+
 pub struct ServerState {
-    pub client: Arc<DatadogClient>,
-    pub config: DatadogConfig,
-    pub output_format: OutputFormat,
-    pub allow_write: bool,
-    pub cache_responses: bool,
-    pub cache_dir: PathBuf,
-    pub cache_max_bytes: u64,
+    context: ToolContext,
+    access_mode: AccessMode,
 }
 
 #[derive(Debug, Clone)]
 pub struct ServerOptions {
-    pub allow_write: bool,
-    pub cache_responses: bool,
-    pub cache_dir: PathBuf,
-    pub cache_max_bytes: u64,
+    pub access_mode: AccessMode,
+    pub cache: CacheStore,
 }
 
 impl Default for ServerOptions {
     fn default() -> Self {
         Self {
-            allow_write: false,
-            cache_responses: false,
-            cache_dir: crate::cache::default_cache_dir(),
-            cache_max_bytes: 100 * 1024 * 1024,
+            access_mode: AccessMode::ReadOnly,
+            cache: CacheStore::disabled(),
         }
     }
 }
@@ -52,10 +55,7 @@ impl Default for ServerOptions {
 pub struct ToolContext {
     pub client: Arc<DatadogClient>,
     pub output_format: OutputFormat,
-    pub allow_write: bool,
-    pub cache_responses: bool,
-    pub cache_dir: PathBuf,
-    pub cache_max_bytes: u64,
+    pub cache: CacheStore,
 }
 
 impl ToolContext {
@@ -63,25 +63,19 @@ impl ToolContext {
         Self {
             client,
             output_format,
-            allow_write: false,
-            cache_responses: false,
-            cache_dir: crate::cache::default_cache_dir(),
-            cache_max_bytes: 100 * 1024 * 1024,
+            cache: CacheStore::disabled(),
         }
     }
 
-    pub fn with_options(
+    pub fn with_cache(
         client: Arc<DatadogClient>,
         output_format: OutputFormat,
-        options: &ServerOptions,
+        cache: CacheStore,
     ) -> Self {
         Self {
             client,
             output_format,
-            allow_write: options.allow_write,
-            cache_responses: options.cache_responses,
-            cache_dir: options.cache_dir.clone(),
-            cache_max_bytes: options.cache_max_bytes,
+            cache,
         }
     }
 
@@ -143,42 +137,36 @@ impl ToolContext {
 }
 
 impl ServerState {
-    pub async fn new(config: DatadogConfig, output_format: OutputFormat) -> Result<Self> {
-        Self::new_with_options(config, output_format, ServerOptions::default()).await
+    pub fn new(config: DatadogConfig, output_format: OutputFormat) -> Result<Self> {
+        Self::new_with_options(config, output_format, ServerOptions::default())
     }
 
-    pub async fn new_with_options(
+    pub fn new_with_options(
         config: DatadogConfig,
         output_format: OutputFormat,
         options: ServerOptions,
     ) -> Result<Self> {
-        let client = DatadogClient::new(config.clone())?;
+        let client = DatadogClient::new(config)?;
         Ok(Self {
-            client: Arc::new(client),
-            config,
-            output_format,
-            allow_write: options.allow_write,
-            cache_responses: options.cache_responses,
-            cache_dir: options.cache_dir,
-            cache_max_bytes: options.cache_max_bytes,
+            context: ToolContext::with_cache(Arc::new(client), output_format, options.cache),
+            access_mode: options.access_mode,
         })
     }
 
     pub fn tool_context(&self) -> ToolContext {
-        ToolContext::with_options(
-            self.client.clone(),
-            self.output_format,
-            &ServerOptions {
-                allow_write: self.allow_write,
-                cache_responses: self.cache_responses,
-                cache_dir: self.cache_dir.clone(),
-                cache_max_bytes: self.cache_max_bytes,
-            },
-        )
+        self.context.clone()
+    }
+
+    pub const fn access_mode(&self) -> AccessMode {
+        self.access_mode
+    }
+
+    pub fn site(&self) -> &str {
+        &self.context.client.config().site
     }
 
     pub async fn test_connection(&self) -> Result<()> {
-        self.client.validate_keys().await?;
+        self.context.client.validate_keys().await?;
         Ok(())
     }
 }
@@ -191,18 +179,19 @@ mod tests {
         DatadogConfig::new("test_api_key".into(), "test_app_key".into())
     }
 
-    #[tokio::test]
-    async fn test_server_state_creation() {
+    #[test]
+    fn test_server_state_creation() {
         let config = test_config();
-        let state = ServerState::new(config, OutputFormat::Json).await.unwrap();
-        assert_eq!(state.output_format, OutputFormat::Json);
-        assert_eq!(state.config.site, "datadoghq.com");
+        let state = ServerState::new(config, OutputFormat::Json).unwrap();
+        assert_eq!(state.tool_context().output_format, OutputFormat::Json);
+        assert_eq!(state.site(), "datadoghq.com");
+        assert_eq!(state.access_mode(), AccessMode::ReadOnly);
     }
 
-    #[tokio::test]
-    async fn test_server_state_tool_context() {
+    #[test]
+    fn test_server_state_tool_context() {
         let config = test_config();
-        let state = ServerState::new(config, OutputFormat::Json).await.unwrap();
+        let state = ServerState::new(config, OutputFormat::Json).unwrap();
         let ctx = state.tool_context();
         assert_eq!(ctx.output_format, OutputFormat::Json);
     }

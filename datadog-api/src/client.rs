@@ -1,10 +1,14 @@
 use crate::rate_limit::{RateLimitConfig, RateLimiter};
-use crate::{config::DatadogConfig, error::Error, Result};
+use crate::{
+    config::{DatadogConfig, RetryConfig},
+    error::Error,
+    Result,
+};
 use futures_util::StreamExt;
 use reqwest::{header, Client, RequestBuilder, Response, StatusCode};
 use serde::de::DeserializeOwned;
-use std::future::Future;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::time::Instant;
 use tracing::{debug, error, trace, warn};
 
 fn sanitize_log_message(message: &str) -> String {
@@ -43,6 +47,60 @@ pub struct DatadogClient {
     client: Client,
     config: DatadogConfig,
     rate_limiter: RateLimiter,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RetryClass {
+    Safe,
+    Never,
+}
+
+struct RetryPolicy<'a> {
+    config: &'a RetryConfig,
+}
+
+impl RetryPolicy<'_> {
+    fn permits_retry(&self, class: RetryClass, attempt: u32) -> bool {
+        class == RetryClass::Safe && attempt < self.config.max_retries
+    }
+
+    fn backoff(&self, attempt: u32) -> Duration {
+        let multiplier = self
+            .config
+            .backoff_multiplier
+            .powi(i32::try_from(attempt).unwrap_or(i32::MAX));
+        let base_ms = (self.config.initial_backoff_ms as f64 * multiplier)
+            .min(self.config.max_backoff_ms as f64) as u64;
+        let jitter_seed = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .subsec_nanos() as u64;
+        let jitter_ms = if base_ms == 0 {
+            0
+        } else {
+            jitter_seed % (base_ms / 4 + 1)
+        };
+        Duration::from_millis(base_ms.saturating_add(jitter_ms))
+    }
+
+    fn response_backoff(&self, response: &Response, attempt: u32) -> Duration {
+        if response.status() == StatusCode::TOO_MANY_REQUESTS {
+            response
+                .headers()
+                .get("x-ratelimit-reset")
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.parse::<u64>().ok())
+                .map(Duration::from_secs)
+                .unwrap_or_else(|| self.backoff(attempt))
+        } else {
+            self.backoff(attempt)
+        }
+    }
+}
+
+struct PendingResponse {
+    response: Response,
+    deadline: Instant,
 }
 
 impl DatadogClient {
@@ -148,60 +206,37 @@ impl DatadogClient {
         }
     }
 
-    fn retry_backoff(&self, attempt: u32) -> Duration {
-        let multiplier = self
-            .config
-            .retry_config
-            .backoff_multiplier
-            .powi(i32::try_from(attempt).unwrap_or(i32::MAX));
-        let base_ms = (self.config.retry_config.initial_backoff_ms as f64 * multiplier)
-            .min(self.config.retry_config.max_backoff_ms as f64) as u64;
-        let jitter_seed = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .subsec_nanos() as u64;
-        let jitter_ms = if base_ms == 0 {
-            0
-        } else {
-            jitter_seed % (base_ms / 4 + 1)
-        };
-        Duration::from_millis(base_ms.saturating_add(jitter_ms))
-    }
-
-    fn rate_limit_backoff(&self, response: &Response, attempt: u32) -> Duration {
-        response
-            .headers()
-            .get("x-ratelimit-reset")
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.parse::<u64>().ok())
-            .map(Duration::from_secs)
-            .unwrap_or_else(|| self.retry_backoff(attempt))
-    }
-
-    async fn send_retryable<F>(
+    async fn send_with_policy<F>(
         &self,
         method: &'static str,
         endpoint: &str,
+        retry_class: RetryClass,
         build: F,
-    ) -> Result<Response>
+    ) -> Result<PendingResponse>
     where
         F: Fn() -> RequestBuilder,
     {
         let started = Instant::now();
-        let deadline = Duration::from_secs(self.config.http_config.total_timeout_secs);
+        let deadline = started + Duration::from_secs(self.config.http_config.total_timeout_secs);
+        let policy = RetryPolicy {
+            config: &self.config.retry_config,
+        };
         let mut attempt = 0;
 
         loop {
-            self.rate_limiter.acquire().await;
-            let response = build().send().await;
+            let response = tokio::time::timeout_at(deadline, async {
+                self.rate_limiter.acquire().await;
+                build().send().await
+            })
+            .await
+            .map_err(|_| self.deadline_error())?;
 
             match response {
                 Ok(response) => {
                     let status = response.status();
-                    let retryable = status == StatusCode::TOO_MANY_REQUESTS
-                        || status == StatusCode::REQUEST_TIMEOUT
-                        || status.is_server_error();
-                    if !retryable || attempt >= self.config.retry_config.max_retries {
+                    if !Error::is_retryable_status(status.as_u16())
+                        || !policy.permits_retry(retry_class, attempt)
+                    {
                         debug!(
                             method,
                             endpoint,
@@ -210,19 +245,10 @@ impl DatadogClient {
                             duration_ms = started.elapsed().as_millis(),
                             "Datadog API request completed"
                         );
-                        return Ok(response);
+                        return Ok(PendingResponse { response, deadline });
                     }
 
-                    let backoff = if status == StatusCode::TOO_MANY_REQUESTS {
-                        self.rate_limit_backoff(&response, attempt)
-                    } else {
-                        self.retry_backoff(attempt)
-                    };
-                    if started.elapsed().saturating_add(backoff) >= deadline {
-                        return Err(Error::RequestDeadlineExceeded(
-                            self.config.http_config.total_timeout_secs,
-                        ));
-                    }
+                    let backoff = policy.response_backoff(&response, attempt);
                     warn!(
                         method,
                         endpoint,
@@ -231,19 +257,14 @@ impl DatadogClient {
                         backoff_ms = backoff.as_millis(),
                         "Retrying transient Datadog API response"
                     );
-                    tokio::time::sleep(backoff).await;
+                    self.sleep_before_deadline(deadline, backoff).await?;
                 }
                 Err(error) => {
                     let retryable = error.is_connect() || error.is_timeout();
-                    if !retryable || attempt >= self.config.retry_config.max_retries {
+                    if !retryable || !policy.permits_retry(retry_class, attempt) {
                         return Err(Error::HttpError(error));
                     }
-                    let backoff = self.retry_backoff(attempt);
-                    if started.elapsed().saturating_add(backoff) >= deadline {
-                        return Err(Error::RequestDeadlineExceeded(
-                            self.config.http_config.total_timeout_secs,
-                        ));
-                    }
+                    let backoff = policy.backoff(attempt);
                     warn!(
                         method,
                         endpoint,
@@ -251,7 +272,7 @@ impl DatadogClient {
                         backoff_ms = backoff.as_millis(),
                         "Retrying transient Datadog transport error"
                     );
-                    tokio::time::sleep(backoff).await;
+                    self.sleep_before_deadline(deadline, backoff).await?;
                 }
             }
 
@@ -259,28 +280,19 @@ impl DatadogClient {
         }
     }
 
-    async fn send_once<F, Fut>(
-        &self,
-        method: &'static str,
-        endpoint: &str,
-        send: F,
-    ) -> Result<Response>
-    where
-        F: FnOnce() -> Fut,
-        Fut: Future<Output = std::result::Result<Response, reqwest::Error>>,
-    {
-        self.rate_limiter.acquire().await;
-        let started = Instant::now();
-        let response = send().await.map_err(Error::HttpError)?;
-        debug!(
-            method,
-            endpoint,
-            status = response.status().as_u16(),
-            retries = 0,
-            duration_ms = started.elapsed().as_millis(),
-            "Datadog API request completed"
-        );
-        Ok(response)
+    fn deadline_error(&self) -> Error {
+        Error::RequestDeadlineExceeded(self.config.http_config.total_timeout_secs)
+    }
+
+    async fn sleep_before_deadline(&self, deadline: Instant, duration: Duration) -> Result<()> {
+        let wake_at = Instant::now()
+            .checked_add(duration)
+            .ok_or_else(|| self.deadline_error())?;
+        if wake_at >= deadline {
+            return Err(self.deadline_error());
+        }
+        tokio::time::sleep_until(wake_at).await;
+        Ok(())
     }
 
     async fn read_response_body(&self, response: Response) -> Result<Vec<u8>> {
@@ -349,15 +361,36 @@ impl DatadogClient {
         }
     }
 
+    async fn handle_pending_response<T: DeserializeOwned>(
+        &self,
+        pending: PendingResponse,
+    ) -> Result<T> {
+        tokio::time::timeout_at(pending.deadline, self.handle_response(pending.response))
+            .await
+            .map_err(|_| self.deadline_error())?
+    }
+
+    async fn ensure_pending_success(&self, pending: PendingResponse) -> Result<()> {
+        tokio::time::timeout_at(pending.deadline, async {
+            if pending.response.status().is_success() {
+                Ok(())
+            } else {
+                Err(Self::api_error(pending.response).await)
+            }
+        })
+        .await
+        .map_err(|_| self.deadline_error())?
+    }
+
     pub async fn get<T: DeserializeOwned>(&self, endpoint: &str) -> Result<T> {
         let url = format!("{}{}", self.config.base_url(), endpoint);
-        let response = self
-            .send_retryable("GET", endpoint, || {
+        let pending = self
+            .send_with_policy("GET", endpoint, RetryClass::Safe, || {
                 self.add_operation_headers(self.client.get(&url), endpoint)
             })
             .await?;
 
-        self.handle_response(response).await
+        self.handle_pending_response(pending).await
     }
 
     pub async fn get_with_query<T: DeserializeOwned, Q: serde::Serialize>(
@@ -366,12 +399,12 @@ impl DatadogClient {
         query: &Q,
     ) -> Result<T> {
         let url = format!("{}{}", self.config.base_url(), endpoint);
-        let response = self
-            .send_retryable("GET", endpoint, || {
+        let pending = self
+            .send_with_policy("GET", endpoint, RetryClass::Safe, || {
                 self.add_operation_headers(self.client.get(&url).query(query), endpoint)
             })
             .await?;
-        self.handle_response(response).await
+        self.handle_pending_response(pending).await
     }
 
     pub async fn post<T: DeserializeOwned, B: serde::Serialize>(
@@ -381,27 +414,8 @@ impl DatadogClient {
     ) -> Result<T> {
         let url = format!("{}{}", self.config.base_url(), endpoint);
         let json_body = serde_json::to_string(body).map_err(Error::JsonError)?;
-        let request = self.add_operation_headers(
-            self.client
-                .post(&url)
-                .body(json_body)
-                .header(header::CONTENT_TYPE, "application/json"),
-            endpoint,
-        );
-        let response = self.send_once("POST", endpoint, || request.send()).await?;
-        self.handle_response(response).await
-    }
-
-    /// POST a read-only search request with transient retries.
-    pub async fn post_retryable<T: DeserializeOwned, B: serde::Serialize>(
-        &self,
-        endpoint: &str,
-        body: &B,
-    ) -> Result<T> {
-        let url = format!("{}{}", self.config.base_url(), endpoint);
-        let json_body = serde_json::to_string(body).map_err(Error::JsonError)?;
-        let response = self
-            .send_retryable("POST", endpoint, || {
+        let pending = self
+            .send_with_policy("POST", endpoint, RetryClass::Never, || {
                 self.add_operation_headers(
                     self.client
                         .post(&url)
@@ -411,7 +425,29 @@ impl DatadogClient {
                 )
             })
             .await?;
-        self.handle_response(response).await
+        self.handle_pending_response(pending).await
+    }
+
+    /// POST a read-only search request with transient retries.
+    pub async fn post_search<T: DeserializeOwned, B: serde::Serialize>(
+        &self,
+        endpoint: &str,
+        body: &B,
+    ) -> Result<T> {
+        let url = format!("{}{}", self.config.base_url(), endpoint);
+        let json_body = serde_json::to_string(body).map_err(Error::JsonError)?;
+        let pending = self
+            .send_with_policy("POST", endpoint, RetryClass::Safe, || {
+                self.add_operation_headers(
+                    self.client
+                        .post(&url)
+                        .body(json_body.clone())
+                        .header(header::CONTENT_TYPE, "application/json"),
+                    endpoint,
+                )
+            })
+            .await?;
+        self.handle_pending_response(pending).await
     }
 
     pub async fn put<T: DeserializeOwned, B: serde::Serialize>(
@@ -421,39 +457,38 @@ impl DatadogClient {
     ) -> Result<T> {
         let url = format!("{}{}", self.config.base_url(), endpoint);
         let json_body = serde_json::to_string(body).map_err(Error::JsonError)?;
-        let request = self.add_operation_headers(
-            self.client
-                .put(&url)
-                .body(json_body)
-                .header(header::CONTENT_TYPE, "application/json"),
-            endpoint,
-        );
-        let response = self.send_once("PUT", endpoint, || request.send()).await?;
-        self.handle_response(response).await
+        let pending = self
+            .send_with_policy("PUT", endpoint, RetryClass::Never, || {
+                self.add_operation_headers(
+                    self.client
+                        .put(&url)
+                        .body(json_body.clone())
+                        .header(header::CONTENT_TYPE, "application/json"),
+                    endpoint,
+                )
+            })
+            .await?;
+        self.handle_pending_response(pending).await
     }
 
     pub async fn delete(&self, endpoint: &str) -> Result<()> {
         let url = format!("{}{}", self.config.base_url(), endpoint);
-        let request = self.add_operation_headers(self.client.delete(&url), endpoint);
-        let response = self
-            .send_once("DELETE", endpoint, || request.send())
+        let pending = self
+            .send_with_policy("DELETE", endpoint, RetryClass::Never, || {
+                self.add_operation_headers(self.client.delete(&url), endpoint)
+            })
             .await?;
-
-        let status = response.status();
-        if status.is_success() {
-            Ok(())
-        } else {
-            Err(Self::api_error(response).await)
-        }
+        self.ensure_pending_success(pending).await
     }
 
     pub async fn delete_with_response<T: DeserializeOwned>(&self, endpoint: &str) -> Result<T> {
         let url = format!("{}{}", self.config.base_url(), endpoint);
-        let request = self.add_operation_headers(self.client.delete(&url), endpoint);
-        let response = self
-            .send_once("DELETE", endpoint, || request.send())
+        let pending = self
+            .send_with_policy("DELETE", endpoint, RetryClass::Never, || {
+                self.add_operation_headers(self.client.delete(&url), endpoint)
+            })
             .await?;
-        self.handle_response(response).await
+        self.handle_pending_response(pending).await
     }
 
     /// Returns a reference to the rate limiter (for monitoring)
@@ -499,42 +534,44 @@ impl DatadogClient {
         cache_info: Option<&CacheInfo>,
     ) -> Result<Option<CachedResponse<T>>> {
         let url = format!("{}{}", self.config.base_url(), endpoint);
-        let mut request = self.client.get(&url);
-
-        // Add conditional headers if we have cache info
-        if let Some(info) = cache_info {
-            if let Some(etag) = &info.etag {
-                request = request.header(header::IF_NONE_MATCH, etag.as_str());
-            }
-            if let Some(last_modified) = &info.last_modified {
-                request = request.header(header::IF_MODIFIED_SINCE, last_modified.as_str());
-            }
-        }
-
-        let request = self.add_operation_headers(request, endpoint);
-        let response = self.send_once("GET", endpoint, || request.send()).await?;
+        let pending = self
+            .send_with_policy("GET", endpoint, RetryClass::Safe, || {
+                let mut request = self.client.get(&url);
+                if let Some(info) = cache_info {
+                    if let Some(etag) = &info.etag {
+                        request = request.header(header::IF_NONE_MATCH, etag.as_str());
+                    }
+                    if let Some(last_modified) = &info.last_modified {
+                        request = request.header(header::IF_MODIFIED_SINCE, last_modified.as_str());
+                    }
+                }
+                self.add_operation_headers(request, endpoint)
+            })
+            .await?;
 
         // 304 Not Modified - cached data is still valid
-        if response.status() == reqwest::StatusCode::NOT_MODIFIED {
+        if pending.response.status() == reqwest::StatusCode::NOT_MODIFIED {
             debug!("304 Not Modified - using cached data");
             return Ok(None);
         }
 
         // Extract cache headers before consuming the response
         let new_cache_info = CacheInfo {
-            etag: response
+            etag: pending
+                .response
                 .headers()
                 .get(header::ETAG)
                 .and_then(|v| v.to_str().ok())
                 .map(String::from),
-            last_modified: response
+            last_modified: pending
+                .response
                 .headers()
                 .get(header::LAST_MODIFIED)
                 .and_then(|v| v.to_str().ok())
                 .map(String::from),
         };
 
-        let data: T = self.handle_response(response).await?;
+        let data: T = self.handle_pending_response(pending).await?;
 
         Ok(Some(CachedResponse {
             data,

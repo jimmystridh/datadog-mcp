@@ -1,12 +1,12 @@
 //! Event tools
 
-use crate::response::tool_error;
+use crate::response::ToolOutput;
 use crate::sanitize::{
     sanitize_message, sanitize_name, sanitize_optional, sanitize_tags, MAX_NAME_LENGTH,
 };
 use crate::state::ToolContext;
 use datadog_api::models::*;
-use serde_json::{json, Value};
+use serde_json::json;
 use tracing::info;
 
 pub async fn get_events(
@@ -15,7 +15,7 @@ pub async fn get_events(
     end: i64,
     priority: Option<String>,
     sources: Option<String>,
-) -> anyhow::Result<Value> {
+) -> anyhow::Result<ToolOutput> {
     info!("Getting events from {} to {}", start, end);
 
     let api = ctx.events_api();
@@ -25,8 +25,7 @@ pub async fn get_events(
 
     tool_response_with_fields!(
         result,
-        "events",
-        ctx,
+        no_cache,
         data,
         {
             let event_count = data.events.as_ref().map(|e| e.len()).unwrap_or(0);
@@ -58,15 +57,15 @@ pub async fn create_event(
     date_happened: Option<i64>,
     device_name: Option<String>,
     related_event_id: Option<i64>,
-) -> anyhow::Result<Value> {
+) -> anyhow::Result<ToolOutput> {
     let title = sanitize_name(&title);
     let text = sanitize_message(&text);
 
     if title.is_empty() {
-        return Ok(tool_error("create_event", "Empty title is not allowed"));
+        anyhow::bail!("Empty event title is not allowed");
     }
     if text.is_empty() {
-        return Ok(tool_error("create_event", "Empty text is not allowed"));
+        anyhow::bail!("Empty event text is not allowed");
     }
 
     let tags = tags.map(sanitize_tags);
@@ -98,8 +97,7 @@ pub async fn create_event(
 
     tool_response_with_fields!(
         result,
-        "event_created",
-        ctx,
+        no_cache,
         data,
         {
             let event_id = data.event.as_ref().and_then(|e| e.id);
@@ -116,13 +114,13 @@ pub async fn create_event(
                 "event_id": event_id,
                 "event_id_str": event_id_str,
                 "title": event_title.or_else(|| Some(title.clone())),
-                "status": data.status.clone(),
+                "event_status": data.status.clone(),
             })
         }
     )
 }
 
-pub async fn get_event(ctx: ToolContext, event_id: i64) -> anyhow::Result<Value> {
+pub async fn get_event(ctx: ToolContext, event_id: i64) -> anyhow::Result<ToolOutput> {
     info!("Getting event: {}", event_id);
 
     let api = ctx.events_api();
@@ -130,8 +128,7 @@ pub async fn get_event(ctx: ToolContext, event_id: i64) -> anyhow::Result<Value>
 
     tool_response_with_fields!(
         result,
-        "event",
-        ctx,
+        no_cache,
         data,
         {
             let title = data
@@ -148,7 +145,7 @@ pub async fn get_event(ctx: ToolContext, event_id: i64) -> anyhow::Result<Value>
                 "event_id": event_id,
                 "event_id_str": event_id_str,
                 "title": title,
-                "status": data.status.clone(),
+                "event_status": data.status.clone(),
             })
         }
     )

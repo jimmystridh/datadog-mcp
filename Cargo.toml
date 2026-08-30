@@ -46,4 +46,4 @@ regex = "1.13.1"
 zeroize = { version = "1.9.0", features = ["derive"] }
 
 # Secure storage (platform keyrings)
-keyring = "4.1.6"
+keyring = "4.2.0"

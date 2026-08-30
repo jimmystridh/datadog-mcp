@@ -11,7 +11,7 @@ A high-performance [Model Context Protocol](https://modelcontextprotocol.io/) (M
 
 ## Highlights
 
-- **35+ MCP Tools** — Full coverage of Datadog's core APIs: metrics, monitors, dashboards, logs, synthetics, incidents, and more
+- **39 MCP Tools** — Broad coverage of Datadog's core APIs: metrics, monitors, dashboards, logs, synthetics, incidents, and more
 - **TOON Output Format** — Optional [Token-Oriented Object Notation](https://github.com/toon-format/toon) reduces token usage by 30-60% compared to JSON
 - **Async & Non-blocking** — Built on Tokio for high throughput and responsiveness
 - **Safe Retry** — Read-only requests retry transient failures and honor Datadog rate-limit reset headers; writes are never retried automatically
@@ -26,7 +26,7 @@ A high-performance [Model Context Protocol](https://modelcontextprotocol.io/) (M
 Requires Rust 1.88 or newer.
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/jimmystridh/datadog-mcp.git
 cd datadog-mcp
 cargo build --release
 ```
@@ -146,6 +146,7 @@ Add to your project's `.mcp.json`:
 | `search_metrics` | Find active metrics by name and optional active-since timestamp |
 | `get_metric_metadata` | Retrieve metric metadata |
 | `get_monitors` | List all monitors |
+| `search_monitors` | Search monitors with pagination and sorting |
 | `get_monitor` | Get specific monitor by ID |
 | `create_monitor` | Create new monitor |
 | `update_monitor` | Modify existing monitor |
@@ -167,6 +168,8 @@ Add to your project's `.mcp.json`:
 |------|-------------|
 | `search_logs` | Query one cursor-paginated page of log entries |
 | `get_events` | Retrieve system events |
+| `create_event` | Create a Datadog event |
+| `get_event` | Get a specific event by ID |
 
 ### Infrastructure
 
@@ -185,6 +188,7 @@ Add to your project's `.mcp.json`:
 | `create_synthetics_test` | Create API/HTTP test |
 | `update_synthetics_test` | Modify existing test |
 | `trigger_synthetics_tests` | Run tests on-demand |
+| `delete_synthetics_tests` | Delete one or more tests |
 
 ### Downtimes
 
@@ -226,25 +230,36 @@ Standard JSON output, compatible with all systems:
 ```json
 {
   "status": "success",
+  "summary": "Retrieved 42 monitors",
+  "filepath": null,
   "total_monitors": 42,
-  "monitors": [
-    {"id": 123, "name": "CPU Alert", "status": "OK"},
-    {"id": 124, "name": "Memory Alert", "status": "Alert"}
+  "monitor_states": {"OK": 41, "Alert": 1},
+  "alerting_count": 1,
+  "data": [
+    {"id": 123, "name": "CPU Alert", "overall_state": "OK"},
+    {"id": 124, "name": "Memory Alert", "overall_state": "Alert"}
   ]
 }
 ```
+
+Every successful response uses the same envelope: `status`, a human-readable `summary`, a `filepath` containing the cached path or `null`, optional tool-specific metadata, and the Datadog payload in `data` when returned. Errors use `status: "error"` with an `error` message.
 
 ### TOON (Token-Efficient)
 
 [TOON format](https://github.com/toon-format/toon) optimizes for LLM consumption, reducing tokens by 30-60%:
 
 ```
-status:success
-total_monitors:42
-monitors:[
-  {id:123 name:"CPU Alert" status:OK}
-  {id:124 name:"Memory Alert" status:Alert}
-]
+alerting_count: 1
+data[2]{id,name,overall_state}:
+  123,CPU Alert,OK
+  124,Memory Alert,Alert
+filepath: null
+monitor_states:
+  Alert: 1
+  OK: 41
+status: success
+summary: Retrieved 42 monitors
+total_monitors: 42
 ```
 
 TOON is the default format. Use `--format json` if you need standard JSON output.
@@ -270,16 +285,24 @@ cleanup_cache(older_than_hours: 24)
 ```
 .
 ├── datadog-mcp/          # MCP server (this binary)
-│   └── src/
-│       ├── main.rs       # Entry point, CLI parsing
-│       ├── server.rs     # MCP server & tool handlers
-│       ├── state.rs      # Server state & configuration
-│       ├── cache.rs      # Response caching
-│       └── tools/        # Tool implementations by domain
+│   ├── src/
+│   │   ├── main.rs        # Entry point and CLI parsing
+│   │   ├── server.rs      # MCP registration, annotations, and write policy
+│   │   ├── state.rs       # Shared runtime context
+│   │   ├── response.rs    # Typed response envelope and rendering
+│   │   ├── output.rs      # JSON and TOON formatting
+│   │   ├── cache.rs       # Sandboxed response cache
+│   │   ├── tool_inputs.rs # MCP input schemas
+│   │   └── tools/         # Tool implementations by domain
+│   └── tests/
+│       └── tool_http/    # Domain-split HTTP integration tests
 │
 └── datadog-api/          # Standalone Rust API client
     └── src/
-        ├── client.rs     # HTTP client with retry & rate limiting
+        ├── client.rs             # HTTP client and end-to-end retry deadlines
+        ├── rate_limit.rs         # Shared rate limiting
+        ├── pagination.rs         # Validated pagination types
+        ├── resource_documents.rs # Lossless update documents
         ├── apis/         # API modules (monitors, dashboards, etc.)
         └── models/       # Request/response types
 ```
@@ -289,20 +312,17 @@ The MCP server depends on the [`datadog-api`](datadog-api/) crate, which can als
 ## Development
 
 ```bash
-# Build
-cargo build
+# Match the CI quality gates
+cargo fmt --all -- --check
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo check --locked --workspace --all-targets --no-default-features
+cargo +1.88.0 check --locked --workspace --all-targets --all-features
+cargo test --locked --all --tests -- --nocapture
+cargo audit --deny warnings
+cargo deny check
 
-# Test
-cargo test
-
-# Run with debug logging
-RUST_LOG=debug cargo run -- --format json
-
-# Check formatting
-cargo fmt --check
-
-# Lint
-cargo clippy
+# Run locally with JSON responses and debug logging
+RUST_LOG=debug cargo run --locked -- --format json
 ```
 
 ## Using datadog-api Independently
@@ -310,21 +330,25 @@ cargo clippy
 The API client can be used as a standalone library:
 
 ```rust
-use datadog_api::{DatadogClient, DatadogConfig};
+use datadog_api::apis::MetricsApi;
+use datadog_api::{DatadogClient, DatadogConfig, TimestampSecs};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let config = DatadogConfig::from_env()?;
     let client = DatadogClient::new(config)?;
+    let api = MetricsApi::new(client);
+    let now = TimestampSecs::now();
 
-    // Query metrics
-    let metrics = client.query_metrics(
-        "avg:system.cpu.user{*}",
-        now - 3600,
-        now
-    ).await?;
+    let metrics = api
+        .query_metrics(
+            TimestampSecs::hours_ago(1).as_secs(),
+            now.as_secs(),
+            "avg:system.cpu.user{*}",
+        )
+        .await?;
 
-    println!("{:?}", metrics);
+    println!("{metrics:?}");
     Ok(())
 }
 ```

@@ -21,7 +21,7 @@ pub use incidents::IncidentsApi;
 pub use infrastructure::InfrastructureApi;
 pub use logs::LogsApi;
 pub use metrics::MetricsApi;
-pub use monitors::MonitorsApi;
+pub use monitors::{GetMonitorOptions, MonitorsApi};
 pub use notebooks::NotebooksApi;
 pub use security::SecurityApi;
 pub use slos::SLOsApi;

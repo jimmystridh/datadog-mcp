@@ -81,6 +81,68 @@ async fn test_monitors_api_get() {
 }
 
 #[tokio::test]
+async fn test_monitors_api_get_with_group_states_and_downtimes() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/monitor/12345"))
+        .and(query_param("group_states", "all"))
+        .and(query_param("with_downtimes", "true"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": 12345,
+            "name": "Grouped Monitor",
+            "type": "service check",
+            "overall_state": "Alert",
+            "options": {
+                "notify_no_data": false,
+                "timeout_h": null,
+                "notify_by": ["env", "database_instance"]
+            },
+            "state": {
+                "groups": {
+                    "env:prod,database_instance:old": {
+                        "name": "env:prod,database_instance:old",
+                        "status": "Alert",
+                        "last_triggered_ts": 1788301551
+                    },
+                    "env:prod,database_instance:new": {
+                        "name": "env:prod,database_instance:new",
+                        "status": "OK"
+                    }
+                }
+            },
+            "matching_downtimes": [
+                {"id": 999, "scope": ["env:prod,database_instance:old"]}
+            ],
+            "draft_status": "published"
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let client = create_test_client(&mock_server).await;
+    let api = MonitorsApi::new(client);
+    let options = GetMonitorOptions {
+        group_states: Some("all"),
+        with_downtimes: Some(true),
+    };
+
+    let monitor = api.get_monitor_with_options(12345, &options).await.unwrap();
+
+    let groups = monitor.state.unwrap().groups.unwrap();
+    assert_eq!(groups.len(), 2);
+    assert_eq!(
+        groups["env:prod,database_instance:old"].status.as_deref(),
+        Some("Alert")
+    );
+    assert_eq!(monitor.matching_downtimes.unwrap()[0]["id"], 999);
+    assert_eq!(
+        monitor.options.unwrap().notify_by,
+        Some(vec!["env".to_string(), "database_instance".to_string()])
+    );
+    assert_eq!(monitor.additional_properties["draft_status"], "published");
+}
+
+#[tokio::test]
 async fn test_monitors_api_create() {
     let mock_server = MockServer::start().await;
 

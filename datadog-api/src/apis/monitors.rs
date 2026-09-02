@@ -5,6 +5,17 @@ use crate::{
 };
 use serde::Serialize;
 
+/// Optional detail filters for retrieving a monitor.
+#[derive(Debug, Default, Serialize)]
+pub struct GetMonitorOptions<'a> {
+    /// Comma-separated Datadog group states such as `all` or `alert,no data`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group_states: Option<&'a str>,
+    /// Whether active matching downtimes should be included in the response.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub with_downtimes: Option<bool>,
+}
+
 /// API client for Datadog monitors endpoints.
 pub struct MonitorsApi {
     client: DatadogClient,
@@ -65,6 +76,16 @@ impl MonitorsApi {
     pub async fn get_monitor(&self, monitor_id: i64) -> Result<Monitor> {
         let endpoint = format!("/api/v1/monitor/{}", monitor_id);
         self.client.get(&endpoint).await
+    }
+
+    /// Gets a monitor with optional group-state and downtime details.
+    pub async fn get_monitor_with_options(
+        &self,
+        monitor_id: i64,
+        options: &GetMonitorOptions<'_>,
+    ) -> Result<Monitor> {
+        let endpoint = format!("/api/v1/monitor/{}", monitor_id);
+        self.client.get_with_query(&endpoint, options).await
     }
 
     pub async fn create_monitor(&self, monitor: &MonitorCreateRequest) -> Result<Monitor> {

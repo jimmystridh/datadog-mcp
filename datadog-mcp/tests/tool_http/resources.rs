@@ -37,22 +37,71 @@ async fn get_monitor_success() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/api/v1/monitor/123"))
+        .and(query_param("group_states", "all"))
+        .and(query_param("with_downtimes", "true"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "id": 123,
             "name": "Test Monitor",
             "overall_state": "OK",
-            "monitor_type": "metric alert",
-            "query": "avg(last_5m):avg:system.cpu.user{*} > 80"
+            "type": "metric alert",
+            "query": "avg(last_5m):avg:system.cpu.user{*} > 80",
+            "options": {
+                "notify_no_data": false,
+                "timeout_h": 1,
+                "group_retention_duration": "2h",
+                "on_missing_data": "resolve"
+            },
+            "state": {
+                "groups": {
+                    "env:prod,instance:old": {
+                        "name": "env:prod,instance:old",
+                        "status": "Alert",
+                        "last_triggered_ts": 1788301551,
+                        "last_notified_ts": 1788330351,
+                        "last_nodata_ts": null,
+                        "last_resolved_ts": null
+                    },
+                    "env:prod,instance:new": {
+                        "name": "env:prod,instance:new",
+                        "status": "OK",
+                        "last_triggered_ts": null,
+                        "last_notified_ts": null,
+                        "last_nodata_ts": null,
+                        "last_resolved_ts": null
+                    }
+                }
+            },
+            "matching_downtimes": [
+                {"id": 456, "scope": ["env:prod,instance:old"]}
+            ]
         })))
         .mount(&server)
         .await;
 
     let ctx = mock_context(&server).await;
-    let out = call_tool!(ctx, tools::get_monitor(ctx.clone(), MonitorId(123)));
+    let out = call_tool!(
+        ctx,
+        tools::get_monitor(ctx.clone(), MonitorId(123), None, None)
+    );
     assert_success(&out);
     assert_eq!(out["monitor_id"], 123);
     assert_eq!(out["monitor_name"], "Test Monitor");
     assert_eq!(out["monitor_status"], "ok");
+    assert_eq!(out["group_count"], 2);
+    assert_eq!(out["group_status_counts"]["Alert"], 1);
+    assert_eq!(out["group_status_counts"]["OK"], 1);
+    assert_eq!(out["alerting_group_count"], 1);
+    assert_eq!(out["matching_downtime_count"], 1);
+    assert_eq!(out["requested_group_states"], "all");
+    assert_eq!(out["requested_with_downtimes"], true);
+    assert_eq!(
+        out["data"]["state"]["groups"]["env:prod,instance:old"]["status"],
+        "Alert"
+    );
+    assert_eq!(out["data"]["options"]["timeout_h"], 1);
+    assert_eq!(out["data"]["options"]["group_retention_duration"], "2h");
+    assert_eq!(out["data"]["options"]["on_missing_data"], "resolve");
+    assert_eq!(out["data"]["matching_downtimes"][0]["id"], 456);
 }
 
 #[tokio::test]
@@ -71,10 +120,49 @@ async fn get_monitor_preserves_no_data_status() {
         .await;
 
     let ctx = mock_context(&server).await;
-    let out = call_tool!(ctx, tools::get_monitor(ctx.clone(), MonitorId(124)));
+    let out = call_tool!(
+        ctx,
+        tools::get_monitor(ctx.clone(), MonitorId(124), None, None)
+    );
 
     assert_eq!(out["status"], "success");
     assert_eq!(out["monitor_status"], "no_data");
+}
+
+#[tokio::test]
+async fn get_monitor_supports_narrow_group_state_filters() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/monitor/125"))
+        .and(query_param("group_states", "alert,no data"))
+        .and(query_param("with_downtimes", "false"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": 125,
+            "name": "Filtered Monitor",
+            "overall_state": "Alert",
+            "type": "service check",
+            "state": {"groups": {}}
+        })))
+        .mount(&server)
+        .await;
+
+    let ctx = mock_context(&server).await;
+    let out = call_tool!(
+        ctx,
+        tools::get_monitor(
+            ctx.clone(),
+            MonitorId(125),
+            Some(vec![
+                datadog_mcp::tool_inputs::MonitorGroupStateFilter::Alert,
+                datadog_mcp::tool_inputs::MonitorGroupStateFilter::NoData,
+            ]),
+            Some(false),
+        )
+    );
+
+    assert_success(&out);
+    assert_eq!(out["requested_group_states"], "alert,no data");
+    assert_eq!(out["requested_with_downtimes"], false);
 }
 
 #[tokio::test]

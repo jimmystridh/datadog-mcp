@@ -147,10 +147,14 @@ Add to your project's `.mcp.json`:
 | `get_metric_metadata` | Retrieve metric metadata |
 | `get_monitors` | List all monitors |
 | `search_monitors` | Search monitors with pagination and sorting |
-| `get_monitor` | Get specific monitor by ID |
+| `get_monitor` | Get monitor configuration, group states, status timestamps, and active matching downtimes |
 | `create_monitor` | Create new monitor |
 | `update_monitor` | Modify existing monitor |
 | `delete_monitor` | Remove monitor |
+
+`get_monitor` requests all group states and active matching downtimes by default. Use
+`group_states` to limit the returned states (`all`, `alert`, `warn`, or `no data`), pass an empty
+array to omit group details, or set `with_downtimes` to `false` to omit downtime details.
 
 ### Dashboards
 

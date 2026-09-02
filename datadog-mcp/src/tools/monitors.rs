@@ -9,7 +9,8 @@ use crate::sanitize::{
     MAX_QUERY_LENGTH,
 };
 use crate::state::ToolContext;
-use crate::tool_inputs::{MonitorId, MonitorOptions};
+use crate::tool_inputs::{MonitorGroupStateFilter, MonitorId, MonitorOptions};
+use datadog_api::apis::GetMonitorOptions;
 use datadog_api::models::*;
 use serde_json::json;
 use std::collections::HashMap;
@@ -95,11 +96,32 @@ pub async fn search_monitors(
     )
 }
 
-pub async fn get_monitor(ctx: ToolContext, monitor_id: MonitorId) -> anyhow::Result<ToolOutput> {
+pub async fn get_monitor(
+    ctx: ToolContext,
+    monitor_id: MonitorId,
+    group_states: Option<Vec<MonitorGroupStateFilter>>,
+    with_downtimes: Option<bool>,
+) -> anyhow::Result<ToolOutput> {
     info!("Getting monitor: {}", monitor_id.0);
 
+    let group_states = match group_states {
+        None => Some("all".to_string()),
+        Some(states) if states.is_empty() => None,
+        Some(states) => Some(
+            states
+                .into_iter()
+                .map(MonitorGroupStateFilter::as_query_value)
+                .collect::<Vec<_>>()
+                .join(","),
+        ),
+    };
+    let with_downtimes = with_downtimes.unwrap_or(true);
+    let options = GetMonitorOptions {
+        group_states: group_states.as_deref(),
+        with_downtimes: Some(with_downtimes),
+    };
     let api = ctx.monitors_api();
-    let result = api.get_monitor(monitor_id.0).await;
+    let result = api.get_monitor_with_options(monitor_id.0, &options).await;
 
     tool_response_with_fields!(
         result,
@@ -113,6 +135,33 @@ pub async fn get_monitor(ctx: ToolContext, monitor_id: MonitorId) -> anyhow::Res
             )
         },
         {
+            let groups = data.state.as_ref().and_then(|state| state.groups.as_ref());
+            let group_count = groups.map_or(0, HashMap::len);
+            let mut group_status_counts = HashMap::new();
+            if let Some(groups) = groups {
+                for group in groups.values() {
+                    let status = group.status.as_deref().unwrap_or("Unknown");
+                    *group_status_counts.entry(status).or_insert(0) += 1;
+                }
+            }
+            let alerting_group_count = groups.map_or(0, |groups| {
+                groups
+                    .values()
+                    .filter(|group| group.status.as_deref() == Some("Alert"))
+                    .count()
+            });
+            let warning_group_count = groups.map_or(0, |groups| {
+                groups
+                    .values()
+                    .filter(|group| group.status.as_deref() == Some("Warn"))
+                    .count()
+            });
+            let no_data_group_count = groups.map_or(0, |groups| {
+                groups
+                    .values()
+                    .filter(|group| group.status.as_deref() == Some("No Data"))
+                    .count()
+            });
             let status = data.overall_state.as_deref().map(|state| match state {
                 "Alert" => "alerting",
                 "Warn" => "warning",
@@ -127,6 +176,14 @@ pub async fn get_monitor(ctx: ToolContext, monitor_id: MonitorId) -> anyhow::Res
                 "monitor_name": data.name,
                 "monitor_status": status,
                 "monitor_type": data.monitor_type,
+                "group_count": group_count,
+                "group_status_counts": group_status_counts,
+                "alerting_group_count": alerting_group_count,
+                "warning_group_count": warning_group_count,
+                "no_data_group_count": no_data_group_count,
+                "matching_downtime_count": data.matching_downtimes.as_ref().map_or(0, Vec::len),
+                "requested_group_states": group_states,
+                "requested_with_downtimes": with_downtimes,
             })
         }
     )

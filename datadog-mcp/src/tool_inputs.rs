@@ -48,6 +48,35 @@ pub struct GetMetricMetadataInput {
 pub struct GetMonitorInput {
     #[schemars(description = "Monitor ID")]
     pub monitor_id: MonitorId,
+    #[schemars(
+        description = "Group states to return. Defaults to [\"all\"]. Pass [] to omit group state details"
+    )]
+    pub group_states: Option<Vec<MonitorGroupStateFilter>>,
+    #[schemars(description = "Include active matching downtimes. Defaults to true")]
+    pub with_downtimes: Option<bool>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+pub enum MonitorGroupStateFilter {
+    #[serde(rename = "all")]
+    All,
+    #[serde(rename = "alert")]
+    Alert,
+    #[serde(rename = "warn")]
+    Warn,
+    #[serde(rename = "no data", alias = "no_data")]
+    NoData,
+}
+
+impl MonitorGroupStateFilter {
+    pub const fn as_query_value(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Alert => "alert",
+            Self::Warn => "warn",
+            Self::NoData => "no data",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -352,6 +381,29 @@ mod tests {
     }
 
     #[test]
+    fn test_get_monitor_input_is_backward_compatible() {
+        let input: GetMonitorInput = serde_json::from_str(r#"{"monitor_id":42}"#).unwrap();
+
+        assert_eq!(input.monitor_id.0, 42);
+        assert!(input.group_states.is_none());
+        assert!(input.with_downtimes.is_none());
+    }
+
+    #[test]
+    fn test_get_monitor_input_accepts_group_state_filters() {
+        let input: GetMonitorInput = serde_json::from_str(
+            r#"{"monitor_id":42,"group_states":["alert","no_data"],"with_downtimes":false}"#,
+        )
+        .unwrap();
+
+        let filters = input.group_states.unwrap();
+        assert_eq!(filters.len(), 2);
+        assert_eq!(filters[0].as_query_value(), "alert");
+        assert_eq!(filters[1].as_query_value(), "no data");
+        assert_eq!(input.with_downtimes, Some(false));
+    }
+
+    #[test]
     fn test_create_monitor_input_with_options() {
         let json = r#"{
             "name": "CPU Alert",
@@ -535,6 +587,7 @@ impl From<MonitorThresholds> for datadog_api::models::MonitorThresholds {
             critical: src.critical,
             warning: src.warning,
             ok: src.ok,
+            ..Default::default()
         }
     }
 }
@@ -551,6 +604,7 @@ impl From<MonitorOptions> for datadog_api::models::MonitorOptions {
             include_tags: src.include_tags,
             require_full_window: src.require_full_window,
             new_group_delay: src.new_group_delay,
+            ..Default::default()
         }
     }
 }

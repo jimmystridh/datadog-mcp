@@ -291,29 +291,70 @@ pub struct Monitor {
     pub tags: Option<Tags>,
     pub options: Option<MonitorOptions>,
     pub overall_state: Option<String>,
+    pub overall_state_modified: Option<String>,
+    pub state: Option<MonitorState>,
+    pub matching_downtimes: Option<Vec<JsonValue>>,
     pub created: Option<String>,
     pub modified: Option<String>,
     pub creator: Option<Creator>,
+    #[serde(default, flatten)]
+    pub additional_properties: HashMap<String, JsonValue>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MonitorOptions {
     pub thresholds: Option<MonitorThresholds>,
     pub notify_no_data: Option<bool>,
     pub no_data_timeframe: Option<i64>,
+    pub timeout_h: Option<i64>,
+    pub group_retention_duration: Option<String>,
+    pub on_missing_data: Option<String>,
     pub evaluation_delay: Option<i64>,
     pub renotify_interval: Option<i64>,
+    pub renotify_occurrences: Option<i64>,
+    pub renotify_statuses: Option<Vec<String>>,
     pub escalation_message: Option<String>,
     pub include_tags: Option<bool>,
     pub require_full_window: Option<bool>,
     pub new_group_delay: Option<i64>,
+    pub new_host_delay: Option<i64>,
+    pub notify_audit: Option<bool>,
+    pub notify_by: Option<Vec<String>>,
+    pub notification_preset_name: Option<String>,
+    pub locked: Option<bool>,
+    pub silenced: Option<HashMap<String, Option<i64>>>,
+    #[serde(default, flatten)]
+    pub additional_properties: HashMap<String, JsonValue>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MonitorThresholds {
     pub critical: Option<f64>,
     pub warning: Option<f64>,
     pub ok: Option<f64>,
+    pub critical_recovery: Option<f64>,
+    pub warning_recovery: Option<f64>,
+    #[serde(default, flatten)]
+    pub additional_properties: HashMap<String, JsonValue>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MonitorState {
+    pub groups: Option<HashMap<String, MonitorStateGroup>>,
+    #[serde(default, flatten)]
+    pub additional_properties: HashMap<String, JsonValue>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MonitorStateGroup {
+    pub name: Option<String>,
+    pub status: Option<String>,
+    pub last_triggered_ts: Option<i64>,
+    pub last_notified_ts: Option<i64>,
+    pub last_nodata_ts: Option<i64>,
+    pub last_resolved_ts: Option<i64>,
+    #[serde(default, flatten)]
+    pub additional_properties: HashMap<String, JsonValue>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

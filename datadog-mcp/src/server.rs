@@ -131,14 +131,19 @@ impl DatadogMcpServer {
         )
     }
 
-    #[tool(description = "Get specific monitor by ID", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = true))]
+    #[tool(description = "Get a monitor by ID, including all group states and active matching downtimes by default", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = true))]
     pub async fn get_monitor(
         &self,
         Parameters(input): Parameters<GetMonitorInput>,
     ) -> Result<CallToolResult, ErrorData> {
         tool_call!(
             self,
-            tools::get_monitor(self.state.tool_context(), input.monitor_id)
+            tools::get_monitor(
+                self.state.tool_context(),
+                input.monitor_id,
+                input.group_states,
+                input.with_downtimes,
+            )
         )
     }
 
@@ -697,6 +702,8 @@ mod tests {
         let result = server
             .get_monitor(Parameters(GetMonitorInput {
                 monitor_id: crate::ids::MonitorId(42),
+                group_states: None,
+                with_downtimes: None,
             }))
             .await
             .unwrap();

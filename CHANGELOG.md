@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed unused direct dependencies and replaced Chrono usage with standard or project-native timestamp APIs where formatting was unnecessary.
 - Fixed tests that did not compile without the optional TOON feature and added minimal-feature validation to CI.
 - Added MCP structured content, inline bounded results, cursor/offset pagination, and correct `isError` tool results.
+- Made `get_monitor` return group states, transition timestamps, active matching downtimes, and complete monitor options by default, with filters for narrower responses.
 - Made dashboard and Synthetics updates preserve fields unknown to this client.
 - Made response caching opt-in, excluded sensitive domains, confined cache reads, and added retention/size limits.
 - Added method-aware retries with jitter, rate-limit reset handling, total deadlines, and no automatic write retries.

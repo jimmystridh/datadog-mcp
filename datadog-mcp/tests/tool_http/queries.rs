@@ -82,7 +82,10 @@ async fn get_monitor_not_found() {
         .await;
 
     let ctx = mock_context(&server).await;
-    let out = call_tool!(ctx, tools::get_monitor(ctx.clone(), MonitorId(42)));
+    let out = call_tool!(
+        ctx,
+        tools::get_monitor(ctx.clone(), MonitorId(42), None, None)
+    );
     assert_eq!(out["status"], "error");
 }
 

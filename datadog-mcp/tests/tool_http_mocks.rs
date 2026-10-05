@@ -35,6 +35,8 @@ async fn mock_context(server: &MockServer) -> ToolContext {
     )
 }
 
+#[path = "tool_http/database_monitoring.rs"]
+mod database_monitoring;
 #[path = "tool_http/platform.rs"]
 mod platform;
 #[path = "tool_http/queries.rs"]

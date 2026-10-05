@@ -15,6 +15,7 @@ Legend:
 | Area | datadog-api crate | MCP tools | Notes |
 | --- | --- | --- | --- |
 | Metrics | Read-only | Read-only | v2 timeseries query plus active list/metadata; no metric submission or metadata updates. |
+| Database Monitoring | Query metrics + sample search | Read-only | Scalar metrics ranked by query signature; activity/session and explain-plan samples from the databasequery index. API keys, no browser; sample API requires an unscoped app key. |
 | Monitors | CRUD + search | CRUD + search |  |
 | Dashboards | CRUD | CRUD |  |
 | Logs | Search-only | Search-only | No indexes/pipelines/archives. |
@@ -42,7 +43,7 @@ Legend:
 - RUM (events, analytics, session replay)
 - CI/CD & Testing (CI visibility, test runs, pipelines)
 - Cloud integrations (AWS/Azure/GCP, cost management)
-- Advanced monitoring (network, database, processes, containers)
+- Advanced monitoring (network, processes, containers; DBM analytics and configuration beyond query metrics/sample search)
 - Security (signals, findings, compliance, audit logs)
 - Admin/Org (orgs, roles/permissions, API/app keys, usage/billing)
 - Logs management (pipelines, processors, indexes, archives)

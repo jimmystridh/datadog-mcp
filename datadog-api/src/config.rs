@@ -176,6 +176,19 @@ impl DatadogConfig {
             .unwrap_or_else(|| format!("https://api.{}", self.site))
     }
 
+    /// Origin for documented Database Monitoring APIs hosted on the Datadog app.
+    #[must_use]
+    pub fn app_base_url(&self) -> String {
+        self.base_url_override
+            .clone()
+            .unwrap_or_else(|| match self.site.as_str() {
+                "datadoghq.com" | "datadoghq.eu" | "ddog-gov.com" => {
+                    format!("https://app.{}", self.site)
+                }
+                _ => format!("https://{}", self.site),
+            })
+    }
+
     /// Validate the configured Datadog site before making network requests.
     pub fn validate_site(&self) -> crate::Result<()> {
         if let Some(base_url) = &self.base_url_override {

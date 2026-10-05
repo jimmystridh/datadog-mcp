@@ -7,6 +7,63 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DatabaseSampleType {
+    Activity,
+    Plan,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DatabaseQueryAggregator {
+    Sum,
+    Avg,
+    Min,
+    Max,
+    Last,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SearchDatabaseQuerySamplesInput {
+    #[schemars(
+        description = "DBM search filter, e.g. env:prod @database_instance:server @sqlserver.session_id:85 or @db.query_signature:signature. Empty matches all. Uses the separate databasequery index, not ordinary logs."
+    )]
+    pub query: String,
+    #[schemars(description = "Start time in Unix seconds (not milliseconds)")]
+    pub from_timestamp: i64,
+    #[schemars(description = "End time in Unix seconds (not milliseconds)")]
+    pub to_timestamp: i64,
+    #[schemars(
+        description = "activity for active-session/query snapshots (default); plan for explain-plan samples"
+    )]
+    pub sample_type: Option<DatabaseSampleType>,
+    #[schemars(
+        description = "Maximum newest records to return, 1–1000; default 100. One bounded page; narrow filters or time range for more."
+    )]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct GetDatabaseQueryMetricsInput {
+    #[schemars(
+        description = "DBM metric query grouped by query_signature and database_instance, e.g. sum:sqlserver.queries.time{env:prod} by {query_signature,database_instance}. Discover engine-specific metrics with search_metrics."
+    )]
+    pub query: String,
+    #[schemars(description = "Start time in Unix seconds (not milliseconds)")]
+    pub from_timestamp: i64,
+    #[schemars(description = "End time in Unix seconds (not milliseconds)")]
+    pub to_timestamp: i64,
+    #[schemars(
+        description = "Aggregation over the time window; defaults to sum for total duration or execution count"
+    )]
+    pub aggregator: Option<DatabaseQueryAggregator>,
+    #[schemars(
+        description = "Maximum query groups ranked by descending metric value, 1–1000; default 100"
+    )]
+    pub limit: Option<u32>,
+}
+
 // Re-export IDs for external use
 #[allow(unused_imports)]
 pub use crate::ids::{

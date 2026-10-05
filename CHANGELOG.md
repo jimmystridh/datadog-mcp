@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Improved
 
+- Added `get_database_query_metrics` and `search_database_query_samples` using Datadog's documented
+  Database Monitoring APIs, including ranked query metrics, active-session attributes, SQL statements,
+  and explain-plan samples without browser authentication. Added region-aware app origins, bounded
+  results, timestamp validation, full attribute preservation, and actionable DBM permission errors.
 - Made partial monitor updates omit unspecified fields and merge option patches with current
   options, preserving tags, notification settings, nested thresholds, and unknown options.
 - Reused RMCP's cached tool router and removed the redundant custom initialization handler.

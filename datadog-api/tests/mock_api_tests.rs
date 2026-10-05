@@ -13,6 +13,8 @@ async fn create_test_client(server: &MockServer) -> DatadogClient {
     DatadogClient::new(config).unwrap()
 }
 
+#[path = "mock_api/database_monitoring.rs"]
+mod database_monitoring;
 #[path = "mock_api/platform.rs"]
 mod platform;
 #[path = "mock_api/resilience.rs"]

@@ -11,7 +11,7 @@ A high-performance [Model Context Protocol](https://modelcontextprotocol.io/) (M
 
 ## Highlights
 
-- **39 MCP Tools** — Broad coverage of Datadog's core APIs: metrics, monitors, dashboards, logs, synthetics, incidents, and more
+- **41 MCP Tools** — Broad coverage of Datadog's core APIs: metrics, monitors, database monitoring, dashboards, logs, synthetics, incidents, and more
 - **TOON Output Format** — Optional [Token-Oriented Object Notation](https://github.com/toon-format/toon) reduces token usage by 30-60% compared to JSON
 - **Async & Non-blocking** — Built on Tokio for high throughput and responsiveness
 - **Safe Retry** — Read-only requests retry transient failures and honor Datadog rate-limit reset headers; writes are never retried automatically
@@ -165,6 +165,35 @@ array to omit group details, or set `with_downtimes` to `false` to omit downtime
 | `create_dashboard` | Create new dashboard |
 | `update_dashboard` | Modify existing dashboard |
 | `delete_dashboard` | Remove dashboard |
+
+### Database Monitoring
+
+| Tool | Description |
+|------|-------------|
+| `get_database_query_metrics` | Rank query signatures by duration, executions, or other DBM metrics |
+| `search_database_query_samples` | Read active-session snapshots or explain-plan samples with full event attributes |
+
+These tools use Datadog's [documented DBM API](https://docs.datadoghq.com/database_monitoring/guide/build_apps_with_dbm_api/)
+with API-key authentication. No browser session is needed. Sample searches require an **unscoped
+application key** because `built_in_features` cannot be assigned to a scoped key, and the caller
+needs Database Monitoring access. Scalar metrics need metric-query permissions. DBM must be
+enabled on the database integration.
+
+For SQL Server, call `get_database_query_metrics` with
+`sum:sqlserver.queries.time{env:prod} by {query_signature,database_instance}`, Unix-second
+`from_timestamp` and `to_timestamp`, and `aggregator: "sum"` to rank total execution duration.
+Use `sqlserver.queries.count` for execution counts. Returned group and numeric columns share row
+indices. A signature's SQL statement can be retrieved with `search_database_query_samples`,
+filtering `env:prod @db.query_signature:<signature>` and `sample_type: "plan"`.
+
+For the Active Connections view, search `env:prod @sqlserver.session_id:85` with
+`sample_type: "activity"` (the default). Full details are at
+`data.result.events[].event.custom`: SQL text, user, application, wait events, session IDs,
+and engine-specific blocking/transaction fields when collected. Results are historical snapshots;
+they do not execute SQL against the database. Each search returns at most `limit` newest records
+(default 100, maximum 1000). Narrow the filter or time range for additional records. Raw paging
+metadata is preserved, but resuming a page is not currently supported. SQL statements and plans
+are never written to the optional response cache.
 
 ### Logs & Events
 

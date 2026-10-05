@@ -1,4 +1,5 @@
 pub mod dashboards;
+pub mod database_monitoring;
 pub mod downtimes;
 pub mod events;
 pub mod incidents;
@@ -15,6 +16,7 @@ pub mod traces;
 pub mod users;
 
 pub use dashboards::DashboardsApi;
+pub use database_monitoring::DatabaseMonitoringApi;
 pub use downtimes::DowntimesApi;
 pub use events::EventsApi;
 pub use incidents::IncidentsApi;

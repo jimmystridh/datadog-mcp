@@ -4,6 +4,7 @@
 
 mod cache_tools;
 mod dashboards;
+mod database_monitoring;
 mod downtimes;
 mod events;
 mod incidents;
@@ -22,6 +23,7 @@ mod validation;
 // Re-export all tool functions
 pub use cache_tools::*;
 pub use dashboards::*;
+pub use database_monitoring::*;
 pub use downtimes::*;
 pub use events::*;
 pub use incidents::*;

@@ -7,9 +7,9 @@
 use anyhow::Result;
 use datadog_api::{
     apis::{
-        DashboardsApi, DowntimesApi, EventsApi, IncidentsApi, InfrastructureApi, LogsApi,
-        MetricsApi, MonitorsApi, NotebooksApi, SLOsApi, SecurityApi, SyntheticsApi, TeamsApi,
-        UsersApi,
+        DashboardsApi, DatabaseMonitoringApi, DowntimesApi, EventsApi, IncidentsApi,
+        InfrastructureApi, LogsApi, MetricsApi, MonitorsApi, NotebooksApi, SLOsApi, SecurityApi,
+        SyntheticsApi, TeamsApi, UsersApi,
     },
     DatadogClient, DatadogConfig,
 };
@@ -81,6 +81,10 @@ impl ToolContext {
 
     pub fn metrics_api(&self) -> MetricsApi {
         MetricsApi::new((*self.client).clone())
+    }
+
+    pub fn database_monitoring_api(&self) -> DatabaseMonitoringApi {
+        DatabaseMonitoringApi::new((*self.client).clone())
     }
 
     pub fn monitors_api(&self) -> MonitorsApi {

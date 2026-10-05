@@ -67,6 +67,22 @@ impl DatadogMcpServer {
     // METRICS
     // ============================================================================
 
+    #[tool(description = "Search Database Monitoring active-session/query samples or explain-plan samples. Returns full SQL statements, session IDs, users, applications, wait events, blocking and transaction attributes when collected. Uses API keys and the databasequery index; requires an unscoped application key. Results are newest first, one bounded page, and are historical samples rather than a live SQL connection.", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = true))]
+    pub async fn search_database_query_samples(
+        &self,
+        Parameters(input): Parameters<SearchDatabaseQuerySamplesInput>,
+    ) -> Result<CallToolResult, ErrorData> {
+        tool_call!(self, tools::search_database_query_samples(self.state.tool_context(), input))
+    }
+
+    #[tool(description = "Rank Database Monitoring query signatures by total duration, executions, or another DBM metric over a time window. Uses the scalar metrics API; returned group and number columns share row indices. Filter database_instance and group by query_signature, then use search_database_query_samples to retrieve SQL statements and session details for a signature.", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = true))]
+    pub async fn get_database_query_metrics(
+        &self,
+        Parameters(input): Parameters<GetDatabaseQueryMetricsInput>,
+    ) -> Result<CallToolResult, ErrorData> {
+        tool_call!(self, tools::get_database_query_metrics(self.state.tool_context(), input))
+    }
+
     #[tool(description = "Query Datadog metrics time series data", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = true))]
     pub async fn get_metrics(
         &self,

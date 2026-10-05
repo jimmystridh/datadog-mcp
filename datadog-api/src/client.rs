@@ -434,7 +434,27 @@ impl DatadogClient {
         endpoint: &str,
         body: &B,
     ) -> Result<T> {
-        let url = format!("{}{}", self.config.base_url(), endpoint);
+        self.post_search_at(&self.config.base_url(), endpoint, body)
+            .await
+    }
+
+    /// Read-only search on the configured app origin, using the same credentials and limits.
+    pub(crate) async fn post_app_search<T: DeserializeOwned, B: serde::Serialize>(
+        &self,
+        endpoint: &str,
+        body: &B,
+    ) -> Result<T> {
+        self.post_search_at(&self.config.app_base_url(), endpoint, body)
+            .await
+    }
+
+    async fn post_search_at<T: DeserializeOwned, B: serde::Serialize>(
+        &self,
+        origin: &str,
+        endpoint: &str,
+        body: &B,
+    ) -> Result<T> {
+        let url = format!("{origin}{endpoint}");
         let json_body = serde_json::to_string(body).map_err(Error::JsonError)?;
         let pending = self
             .send_with_policy("POST", endpoint, RetryClass::Safe, || {

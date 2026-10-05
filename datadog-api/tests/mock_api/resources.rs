@@ -184,6 +184,9 @@ async fn test_monitors_api_update() {
 
     Mock::given(method("PUT"))
         .and(path("/api/v1/monitor/12345"))
+        .and(body_json(
+            serde_json::json!({"name":"Updated Monitor", "query":"avg:system.cpu.user{*} > 95"}),
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "id": 12345,
             "name": "Updated Monitor",
@@ -209,6 +212,49 @@ async fn test_monitors_api_update() {
 
     let monitor = result.unwrap();
     assert_eq!(monitor.name, Some("Updated Monitor".to_string()));
+}
+
+#[tokio::test]
+async fn monitor_option_patch_preserves_routing_and_unspecified_settings() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/monitor/12345"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id":12345, "tags":["env:prod"], "options":{
+                "require_full_window":true,"renotify_interval":60,"new_group_delay":300,
+                "notify_no_data":false,"unknown_future_option":{"enabled":true},
+                "thresholds":{"critical":0.85,"warning":0.68,"warning_recovery":0.6}
+            }
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/monitor/12345"))
+        .and(body_json(serde_json::json!({"options":{
+            "require_full_window":true,"renotify_interval":60,"new_group_delay":300,
+            "notify_no_data":false,"unknown_future_option":{"enabled":true},
+            "thresholds":{"critical":0.9,"warning":0.68,"warning_recovery":0.6}
+        }})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"id":12345})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let api = MonitorsApi::new(create_test_client(&server).await);
+    let update = MonitorUpdateRequest {
+        name: None,
+        query: None,
+        message: None,
+        tags: None,
+        options: Some(MonitorOptions {
+            thresholds: Some(MonitorThresholds {
+                critical: Some(0.9),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+    };
+    api.update_monitor(12345, &update).await.unwrap();
 }
 
 #[tokio::test]

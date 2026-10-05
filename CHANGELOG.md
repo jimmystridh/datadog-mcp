@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Improved
 
+- Made partial monitor updates omit unspecified fields and merge option patches with current
+  options, preserving tags, notification settings, nested thresholds, and unknown options.
 - Reused RMCP's cached tool router and removed the redundant custom initialization handler.
 - Fixed active metric discovery by sending Datadog's required `from` timestamp and filtering metric names locally.
 - Accepted nullable metric units and empty scale factors returned by the Datadog timeseries API.

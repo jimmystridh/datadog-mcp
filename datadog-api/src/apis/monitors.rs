@@ -98,11 +98,48 @@ impl MonitorsApi {
         update: &MonitorUpdateRequest,
     ) -> Result<Monitor> {
         let endpoint = format!("/api/v1/monitor/{}", monitor_id);
-        self.client.put(&endpoint, update).await
+        let mut body = serde_json::to_value(update)?;
+        body.as_object_mut()
+            .expect("monitor update is an object")
+            .retain(|_, value| !value.is_null());
+        if let Some(patch) = body.get("options").cloned() {
+            let current: serde_json::Value = self.client.get(&endpoint).await?;
+            let mut options = current
+                .get("options")
+                .cloned()
+                .filter(serde_json::Value::is_object)
+                .ok_or_else(|| {
+                    crate::Error::InvalidResponse("Monitor response is missing options".into())
+                })?;
+            merge_monitor_options(&mut options, &patch);
+            body["options"] = options;
+        }
+        self.client.put(&endpoint, &body).await
     }
 
     pub async fn delete_monitor(&self, monitor_id: i64) -> Result<()> {
         let endpoint = format!("/api/v1/monitor/{}", monitor_id);
         self.client.delete(&endpoint).await
+    }
+}
+
+fn merge_monitor_options(current: &mut serde_json::Value, patch: &serde_json::Value) {
+    if let (Some(current), Some(patch)) = (current.as_object_mut(), patch.as_object()) {
+        for (key, value) in patch {
+            if value.is_null() {
+                continue;
+            }
+            if value.is_object() {
+                let target = current
+                    .entry(key.clone())
+                    .or_insert_with(|| serde_json::json!({}));
+                if !target.is_object() {
+                    *target = serde_json::json!({});
+                }
+                merge_monitor_options(target, value);
+            } else {
+                current.insert(key.clone(), value.clone());
+            }
+        }
     }
 }

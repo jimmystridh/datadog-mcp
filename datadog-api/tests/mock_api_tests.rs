@@ -4,7 +4,7 @@ use datadog_api::models::*;
 use datadog_api::{
     apis::*, DashboardDocument, DatadogClient, DatadogConfig, NumberedPage, OffsetPage,
 };
-use wiremock::matchers::{header, method, path, query_param};
+use wiremock::matchers::{body_json, header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 async fn create_test_client(server: &MockServer) -> DatadogClient {

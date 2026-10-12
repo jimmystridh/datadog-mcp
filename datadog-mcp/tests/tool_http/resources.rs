@@ -166,6 +166,159 @@ async fn get_monitor_supports_narrow_group_state_filters() {
 }
 
 #[tokio::test]
+async fn resolve_monitor_group_verifies_exact_group_transition() {
+    let server = MockServer::start().await;
+    let read_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let responder_count = std::sync::Arc::clone(&read_count);
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/monitor/123"))
+        .and(query_param("group_states", "all"))
+        .and(query_param("with_downtimes", "false"))
+        .respond_with(move |_: &wiremock::Request| {
+            let status = if responder_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                "Alert"
+            } else {
+                "OK"
+            };
+            ResponseTemplate::new(200).set_body_json(json!({
+                "id": 123,
+                "name": "SQL connection",
+                "overall_state": status,
+                "type": "service check",
+                "state": {
+                    "groups": {
+                        "database_instance:old.example,env:prod": {
+                            "name": "database_instance:old.example,env:prod",
+                            "status": status,
+                            "last_triggered_ts": 1788301551,
+                            "last_resolved_ts": if status == "OK" { Some(1788332272) } else { None }
+                        }
+                    }
+                }
+            }))
+        })
+        .expect(2)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/monitor/bulk_resolve"))
+        .and(body_json(json!({
+            "resolve": [{"123": "database_instance:old.example,env:prod"}]
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([{
+            "id": 123,
+            "name": "SQL connection",
+            "type": "service check",
+            "overall_state": "Alert"
+        }])))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let ctx = mock_context(&server).await;
+    let out = call_tool!(
+        ctx,
+        tools::resolve_monitor_group(
+            ctx.clone(),
+            MonitorId(123),
+            "database_instance:old.example,env:prod".to_string(),
+        )
+    );
+
+    assert_success(&out);
+    assert_eq!(out["operation_status"], "resolved");
+    assert_eq!(out["previous_status"], "Alert");
+    assert_eq!(out["current_status"], "OK");
+    assert_eq!(out["verified"], true);
+    assert_eq!(out["api_stability"], "legacy_undocumented");
+    assert_eq!(out["data"]["before"]["group"]["status"], "Alert");
+    assert_eq!(out["data"]["after"]["group"]["status"], "OK");
+}
+
+#[tokio::test]
+async fn resolve_monitor_group_does_not_write_when_group_is_already_ok() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/monitor/123"))
+        .and(query_param("group_states", "all"))
+        .and(query_param("with_downtimes", "false"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": 123,
+            "name": "SQL connection",
+            "overall_state": "OK",
+            "type": "service check",
+            "state": {
+                "groups": {
+                    "database_instance:new.example,env:prod": {
+                        "name": "database_instance:new.example,env:prod",
+                        "status": "OK"
+                    }
+                }
+            }
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let ctx = mock_context(&server).await;
+    let out = call_tool!(
+        ctx,
+        tools::resolve_monitor_group(
+            ctx.clone(),
+            MonitorId(123),
+            "database_instance:new.example,env:prod".to_string(),
+        )
+    );
+
+    assert_success(&out);
+    assert_eq!(out["operation_status"], "already_ok");
+    assert_eq!(out["verified"], true);
+}
+
+#[tokio::test]
+async fn resolve_monitor_group_requires_an_exact_existing_group() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/monitor/123"))
+        .and(query_param("group_states", "all"))
+        .and(query_param("with_downtimes", "false"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": 123,
+            "name": "SQL connection",
+            "overall_state": "Alert",
+            "type": "service check",
+            "state": {
+                "groups": {
+                    "database_instance:actual.example,env:prod": {
+                        "name": "database_instance:actual.example,env:prod",
+                        "status": "Alert"
+                    }
+                }
+            }
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let ctx = mock_context(&server).await;
+    let out = call_tool!(
+        ctx,
+        tools::resolve_monitor_group(
+            ctx.clone(),
+            MonitorId(123),
+            "database_instance:typo.example,env:prod".to_string(),
+        )
+    );
+
+    assert_eq!(out["status"], "error");
+    assert!(out["error"]
+        .as_str()
+        .unwrap()
+        .contains("has no exact group"));
+}
+
+#[tokio::test]
 async fn create_monitor_success() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))

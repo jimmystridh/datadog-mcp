@@ -4,7 +4,7 @@
 //! Tools are organized by domain but must remain in a single impl block
 //! due to rmcp's `#[tool_router]` macro requirements.
 
-use crate::response::render_tool_result;
+use crate::response::{render_tool_error, render_tool_result};
 use crate::state::ServerState;
 use crate::tool_inputs::*;
 use crate::tools;
@@ -19,19 +19,20 @@ use std::sync::Arc;
 /// Handles the common pattern of: call tool function -> format response -> return success
 macro_rules! tool_call {
     ($self:ident, $func:expr) => {{
-        let context = $self.state.tool_context();
-        Ok(render_tool_result($func.await, &context).await)
+        match $self.state.initialize_tool_context().await {
+            Ok(context) => Ok(render_tool_result($func.await, &context).await),
+            Err(error) => Ok(render_tool_error(error, $self.state.output_format())),
+        }
     }};
 }
 
 macro_rules! write_tool_call {
     ($self:ident, $func:expr) => {{
         if !$self.state.access_mode().allows_writes() {
-            let context = $self.state.tool_context();
             let error = anyhow::anyhow!(
                 "this tool is disabled because the server is running in read-only mode; restart with --allow-write to enable Datadog mutations"
             );
-            Ok(render_tool_result(Err(error), &context).await)
+            Ok(render_tool_error(error, $self.state.output_format()))
         } else {
             tool_call!($self, $func)
         }
@@ -197,6 +198,21 @@ impl DatadogMcpServer {
                 input.message,
                 input.tags,
                 input.options,
+            )
+        )
+    }
+
+    #[tool(description = "Resolve one exact triggered monitor group through Datadog's legacy undocumented endpoint; may emit a recovery notification", annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = true, open_world_hint = true))]
+    pub async fn resolve_monitor_group(
+        &self,
+        Parameters(input): Parameters<ResolveMonitorGroupInput>,
+    ) -> Result<CallToolResult, ErrorData> {
+        write_tool_call!(
+            self,
+            tools::resolve_monitor_group(
+                self.state.tool_context(),
+                input.monitor_id,
+                input.group_name,
             )
         )
     }
@@ -381,6 +397,17 @@ impl DatadogMcpServer {
         )
     }
 
+    #[tool(description = "Get Kubernetes workload-scaling recommendations through a local Datadog browser session. This uses an undocumented read-only UI endpoint because Datadog does not expose the report through its public API", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = true))]
+    pub async fn get_workload_scaling_recommendations(
+        &self,
+        Parameters(input): Parameters<GetWorkloadScalingRecommendationsInput>,
+    ) -> Result<CallToolResult, ErrorData> {
+        tool_call!(
+            self,
+            tools::get_workload_scaling_recommendations(self.state.tool_context(), input)
+        )
+    }
+
     // ============================================================================
     // DOWNTIMES
     // ============================================================================
@@ -540,6 +567,98 @@ impl DatadogMcpServer {
     }
 
     // ============================================================================
+    // SLACK INTEGRATION
+    // ============================================================================
+
+    #[tool(description = "List channels configured for an installed Datadog Slack account/workspace", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = true))]
+    pub async fn get_slack_channels(
+        &self,
+        Parameters(input): Parameters<SlackAccountInput>,
+    ) -> Result<CallToolResult, ErrorData> {
+        tool_call!(
+            self,
+            tools::get_slack_channels(self.state.tool_context(), input.account_name)
+        )
+    }
+
+    #[tool(description = "Get one configured Datadog Slack channel and its alert display settings", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = true))]
+    pub async fn get_slack_channel(
+        &self,
+        Parameters(input): Parameters<SlackChannelInput>,
+    ) -> Result<CallToolResult, ErrorData> {
+        tool_call!(
+            self,
+            tools::get_slack_channel(
+                self.state.tool_context(),
+                input.account_name,
+                input.channel_name,
+            )
+        )
+    }
+
+    #[tool(description = "Add a Slack channel to an installed Datadog Slack account/workspace for monitor and event notifications", annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = true))]
+    pub async fn create_slack_channel(
+        &self,
+        Parameters(input): Parameters<CreateSlackChannelInput>,
+    ) -> Result<CallToolResult, ErrorData> {
+        write_tool_call!(
+            self,
+            tools::create_slack_channel(
+                self.state.tool_context(),
+                input.account_name,
+                input.channel_name,
+                input.display,
+            )
+        )
+    }
+
+    #[tool(description = "Update a configured Datadog Slack channel name or alert display settings", annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = true, open_world_hint = true))]
+    pub async fn update_slack_channel(
+        &self,
+        Parameters(input): Parameters<UpdateSlackChannelInput>,
+    ) -> Result<CallToolResult, ErrorData> {
+        write_tool_call!(
+            self,
+            tools::update_slack_channel(
+                self.state.tool_context(),
+                input.account_name,
+                input.channel_name,
+                input.new_channel_name,
+                input.display,
+            )
+        )
+    }
+
+    #[tool(description = "Remove a channel from an installed Datadog Slack account/workspace; monitors referencing its handle are not modified", annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = true, open_world_hint = true))]
+    pub async fn delete_slack_channel(
+        &self,
+        Parameters(input): Parameters<SlackChannelInput>,
+    ) -> Result<CallToolResult, ErrorData> {
+        write_tool_call!(
+            self,
+            tools::delete_slack_channel(
+                self.state.tool_context(),
+                input.account_name,
+                input.channel_name,
+            )
+        )
+    }
+
+    #[tool(description = "Audit monitor @slack handles against channels configured for one Datadog Slack account/workspace", annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = true))]
+    pub async fn audit_slack_monitor_notifications(
+        &self,
+        Parameters(input): Parameters<SlackAccountInput>,
+    ) -> Result<CallToolResult, ErrorData> {
+        tool_call!(
+            self,
+            tools::audit_slack_monitor_notifications(
+                self.state.tool_context(),
+                input.account_name,
+            )
+        )
+    }
+
+    // ============================================================================
     // TEAMS & USERS
     // ============================================================================
 
@@ -639,7 +758,29 @@ mod tests {
         assert_eq!(info.protocol_version, ProtocolVersion::LATEST);
         assert!(info.capabilities.tools.is_some());
         assert!(info.instructions.is_some());
-        assert!(server.tool_router.list_all().len() >= 35);
+        assert!(server.tool_router.list_all().len() >= 49);
+    }
+
+    #[tokio::test]
+    async fn deferred_server_metadata_and_read_only_rejections_do_not_load_credentials() {
+        let state = ServerState::deferred(OutputFormat::Json, Default::default());
+        let server = DatadogMcpServer::new(state);
+
+        let _ = server.get_info();
+        let result = server
+            .create_monitor(Parameters(CreateMonitorInput {
+                name: "Blocked".to_string(),
+                monitor_type: "metric alert".to_string(),
+                query: "avg(last_5m):avg:system.cpu.user{*} > 90".to_string(),
+                message: None,
+                tags: None,
+                options: None,
+            }))
+            .await
+            .unwrap();
+
+        assert_eq!(result.is_error, Some(true));
+        assert!(!server.state.is_context_initialized());
     }
 
     #[tokio::test]
@@ -651,6 +792,7 @@ mod tests {
         let write_tools = [
             "create_monitor",
             "update_monitor",
+            "resolve_monitor_group",
             "delete_monitor",
             "create_dashboard",
             "update_dashboard",
@@ -662,6 +804,9 @@ mod tests {
             "update_synthetics_test",
             "trigger_synthetics_tests",
             "delete_synthetics_tests",
+            "create_slack_channel",
+            "update_slack_channel",
+            "delete_slack_channel",
             "cleanup_cache",
         ];
         for tool in server.tool_router.list_all() {
@@ -687,6 +832,11 @@ mod tests {
             Some(false)
         );
 
+        let resolve_monitor_group = server.tool_router.get("resolve_monitor_group").unwrap();
+        let annotations = resolve_monitor_group.annotations.as_ref().unwrap();
+        assert_eq!(annotations.destructive_hint, Some(true));
+        assert_eq!(annotations.idempotent_hint, Some(true));
+
         let result = server
             .create_monitor(Parameters(CreateMonitorInput {
                 name: "Blocked".to_string(),
@@ -695,6 +845,16 @@ mod tests {
                 message: None,
                 tags: None,
                 options: None,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(true));
+        assert_eq!(result.structured_content.unwrap()["status"], "error");
+
+        let result = server
+            .resolve_monitor_group(Parameters(ResolveMonitorGroupInput {
+                monitor_id: crate::ids::MonitorId(42),
+                group_name: "env:prod,database_instance:old".to_string(),
             }))
             .await
             .unwrap();

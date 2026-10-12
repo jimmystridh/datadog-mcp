@@ -1,20 +1,39 @@
 //! Monitor tools
 
 use crate::input_validation::{
-    validate_monitor_name, validate_monitor_query, validate_monitor_type,
+    validate_monitor_group_name, validate_monitor_name, validate_monitor_query,
+    validate_monitor_type,
 };
-use crate::response::{simple_success_with_fields, ToolOutput};
+use crate::response::{simple_success_with_fields, CachePolicy, ToolOutput};
 use crate::sanitize::{
     sanitize_name, sanitize_optional, sanitize_query, MAX_MESSAGE_LENGTH, MAX_NAME_LENGTH,
     MAX_QUERY_LENGTH,
 };
 use crate::state::ToolContext;
 use crate::tool_inputs::{MonitorGroupStateFilter, MonitorId, MonitorOptions};
-use datadog_api::apis::GetMonitorOptions;
+use datadog_api::apis::{GetMonitorOptions, MonitorsApi};
 use datadog_api::models::*;
+use serde::Serialize;
 use serde_json::json;
 use std::collections::HashMap;
+use std::time::Duration;
+use tokio::time::sleep;
 use tracing::info;
+
+const RESOLVE_VERIFICATION_ATTEMPTS: usize = 5;
+const RESOLVE_VERIFICATION_DELAY: Duration = Duration::from_millis(500);
+
+#[derive(Serialize)]
+struct MonitorGroupSnapshot {
+    overall_state: Option<String>,
+    group: Option<MonitorStateGroup>,
+}
+
+#[derive(Serialize)]
+struct MonitorGroupResolution {
+    before: MonitorGroupSnapshot,
+    after: MonitorGroupSnapshot,
+}
 
 pub async fn get_monitors(ctx: ToolContext) -> anyhow::Result<ToolOutput> {
     info!("Getting all monitors");
@@ -187,6 +206,189 @@ pub async fn get_monitor(
             })
         }
     )
+}
+
+pub async fn resolve_monitor_group(
+    ctx: ToolContext,
+    monitor_id: MonitorId,
+    group_name: String,
+) -> anyhow::Result<ToolOutput> {
+    validate_monitor_group_name(&group_name)?;
+    if group_name.len() > MAX_QUERY_LENGTH {
+        anyhow::bail!(
+            "monitor group name is {} bytes; maximum is {MAX_QUERY_LENGTH}",
+            group_name.len()
+        );
+    }
+
+    let api = ctx.monitors_api();
+    let before_monitor = get_monitor_with_all_groups(&api, monitor_id.0).await?;
+    let before_group = find_monitor_group(&before_monitor, &group_name)
+        .cloned()
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "monitor {} has no exact group named '{group_name}'; call get_monitor and copy a key from data.state.groups",
+                monitor_id.0
+            )
+        })?;
+    let previous_status = before_group
+        .status
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("monitor group '{group_name}' has no status"))?;
+
+    if previous_status == "OK" {
+        let data = MonitorGroupResolution {
+            before: monitor_group_snapshot(&before_monitor, Some(before_group.clone())),
+            after: monitor_group_snapshot(&before_monitor, Some(before_group)),
+        };
+        return ToolOutput::from_data(
+            &data,
+            format!(
+                "Monitor group is already OK; no resolution was sent for monitor {}",
+                monitor_id.0
+            ),
+            json!({
+                "monitor_id": monitor_id,
+                "group_name": group_name,
+                "previous_status": "OK",
+                "current_status": "OK",
+                "operation_status": "already_ok",
+                "verified": true,
+                "api_stability": "legacy_undocumented",
+            }),
+            CachePolicy::Never,
+        );
+    }
+
+    if !matches!(previous_status.as_str(), "Alert" | "Warn" | "No Data") {
+        anyhow::bail!(
+            "monitor group '{group_name}' has status '{previous_status}', which is not manually resolvable"
+        );
+    }
+
+    info!(
+        monitor_id = monitor_id.0,
+        group_name, previous_status, "Resolving exact monitor group through legacy endpoint"
+    );
+    api.resolve_monitor_group(monitor_id.0, &group_name).await?;
+
+    let mut verification_result = None;
+    let mut verification_error = None;
+    for attempt in 0..RESOLVE_VERIFICATION_ATTEMPTS {
+        if attempt > 0 {
+            sleep(RESOLVE_VERIFICATION_DELAY).await;
+        }
+        match get_monitor_with_all_groups(&api, monitor_id.0).await {
+            Ok(monitor) => {
+                let group = find_monitor_group(&monitor, &group_name).cloned();
+                let resolved = group
+                    .as_ref()
+                    .is_none_or(|group| group.status.as_deref() == Some("OK"));
+                verification_result = Some((monitor, group));
+                verification_error = None;
+                if resolved {
+                    break;
+                }
+            }
+            Err(error) => {
+                verification_error = Some(error.to_string());
+                break;
+            }
+        }
+    }
+
+    let Some((after_monitor, after_group)) = verification_result else {
+        let data = MonitorGroupResolution {
+            before: monitor_group_snapshot(&before_monitor, Some(before_group)),
+            after: MonitorGroupSnapshot {
+                overall_state: None,
+                group: None,
+            },
+        };
+        return ToolOutput::from_data(
+            &data,
+            format!(
+                "Datadog accepted resolution for monitor {} group '{group_name}', but verification failed",
+                monitor_id.0
+            ),
+            json!({
+                "monitor_id": monitor_id,
+                "group_name": group_name,
+                "previous_status": previous_status,
+                "current_status": "Unknown",
+                "operation_status": "resolution_accepted_unverified",
+                "verified": false,
+                "verification_error": verification_error,
+                "api_stability": "legacy_undocumented",
+            }),
+            CachePolicy::Never,
+        );
+    };
+    let verified = after_group
+        .as_ref()
+        .is_none_or(|group| group.status.as_deref() == Some("OK"));
+    let current_status = after_group
+        .as_ref()
+        .and_then(|group| group.status.clone())
+        .unwrap_or_else(|| "Dropped".to_string());
+    let operation_status = if verified {
+        "resolved"
+    } else {
+        "resolution_pending"
+    };
+    let summary = if verified {
+        format!("Resolved monitor {} group '{group_name}'", monitor_id.0)
+    } else {
+        format!(
+            "Datadog accepted resolution for monitor {} group '{group_name}', but its current status is still '{current_status}'",
+            monitor_id.0
+        )
+    };
+    let data = MonitorGroupResolution {
+        before: monitor_group_snapshot(&before_monitor, Some(before_group)),
+        after: monitor_group_snapshot(&after_monitor, after_group),
+    };
+
+    ToolOutput::from_data(
+        &data,
+        summary,
+        json!({
+            "monitor_id": monitor_id,
+            "group_name": group_name,
+            "previous_status": previous_status,
+            "current_status": current_status,
+            "operation_status": operation_status,
+            "verified": verified,
+            "verification_error": verification_error,
+            "api_stability": "legacy_undocumented",
+        }),
+        CachePolicy::Never,
+    )
+}
+
+async fn get_monitor_with_all_groups(
+    api: &MonitorsApi,
+    monitor_id: i64,
+) -> anyhow::Result<Monitor> {
+    let options = GetMonitorOptions {
+        group_states: Some("all"),
+        with_downtimes: Some(false),
+    };
+    Ok(api.get_monitor_with_options(monitor_id, &options).await?)
+}
+
+fn find_monitor_group<'a>(monitor: &'a Monitor, group_name: &str) -> Option<&'a MonitorStateGroup> {
+    monitor.state.as_ref()?.groups.as_ref()?.get(group_name)
+}
+
+fn monitor_group_snapshot(
+    monitor: &Monitor,
+    group: Option<MonitorStateGroup>,
+) -> MonitorGroupSnapshot {
+    MonitorGroupSnapshot {
+        overall_state: monitor.overall_state.clone(),
+        group,
+    }
 }
 
 pub async fn create_monitor(

@@ -258,6 +258,37 @@ async fn monitor_option_patch_preserves_routing_and_unspecified_settings() {
 }
 
 #[tokio::test]
+async fn test_monitors_api_resolve_exact_group() {
+    let mock_server = MockServer::start().await;
+    let group_name = "database_instance:old.example,env:prod";
+
+    Mock::given(method("POST"))
+        .and(path("/monitor/bulk_resolve"))
+        .and(body_json(serde_json::json!({
+            "resolve": [{"12345": group_name}]
+        })))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                "id": 12345,
+                "name": "SQL connection",
+                "type": "service check",
+                "overall_state": "OK"
+            }])),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let client = create_test_client(&mock_server).await;
+    let api = MonitorsApi::new(client);
+
+    let monitors = api.resolve_monitor_group(12345, group_name).await.unwrap();
+
+    assert_eq!(monitors.len(), 1);
+    assert_eq!(monitors[0].id, Some(12345));
+    assert_eq!(monitors[0].overall_state.as_deref(), Some("OK"));
+}
+
+#[tokio::test]
 async fn test_monitors_api_delete() {
     let mock_server = MockServer::start().await;
 

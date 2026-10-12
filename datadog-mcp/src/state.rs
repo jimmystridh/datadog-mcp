@@ -9,12 +9,15 @@ use datadog_api::{
     apis::{
         DashboardsApi, DatabaseMonitoringApi, DowntimesApi, EventsApi, IncidentsApi,
         InfrastructureApi, LogsApi, MetricsApi, MonitorsApi, NotebooksApi, SLOsApi, SecurityApi,
-        SyntheticsApi, TeamsApi, UsersApi,
+        SlackApi, SyntheticsApi, TeamsApi, UsersApi,
     },
     DatadogClient, DatadogConfig,
 };
 use std::sync::Arc;
+use tokio::sync::OnceCell;
+use tracing::info;
 
+use crate::browser_session::BrowserSessionService;
 use crate::cache::CacheStore;
 use crate::output::OutputFormat;
 
@@ -31,7 +34,9 @@ impl AccessMode {
 }
 
 pub struct ServerState {
-    context: ToolContext,
+    context: OnceCell<ToolContext>,
+    output_format: OutputFormat,
+    cache: CacheStore,
     access_mode: AccessMode,
 }
 
@@ -54,6 +59,7 @@ impl Default for ServerOptions {
 #[derive(Clone)]
 pub struct ToolContext {
     pub client: Arc<DatadogClient>,
+    pub browser_sessions: BrowserSessionService,
     pub output_format: OutputFormat,
     pub cache: CacheStore,
 }
@@ -62,6 +68,7 @@ impl ToolContext {
     pub fn new(client: Arc<DatadogClient>, output_format: OutputFormat) -> Self {
         Self {
             client,
+            browser_sessions: BrowserSessionService::default(),
             output_format,
             cache: CacheStore::disabled(),
         }
@@ -74,6 +81,7 @@ impl ToolContext {
     ) -> Self {
         Self {
             client,
+            browser_sessions: BrowserSessionService::default(),
             output_format,
             cache,
         }
@@ -138,6 +146,10 @@ impl ToolContext {
     pub fn users_api(&self) -> UsersApi {
         UsersApi::new((*self.client).clone())
     }
+
+    pub fn slack_api(&self) -> SlackApi {
+        SlackApi::new((*self.client).clone())
+    }
 }
 
 impl ServerState {
@@ -151,26 +163,82 @@ impl ServerState {
         options: ServerOptions,
     ) -> Result<Self> {
         let client = DatadogClient::new(config)?;
+        let context = OnceCell::new();
+        assert!(
+            context
+                .set(ToolContext::with_cache(
+                    Arc::new(client),
+                    output_format,
+                    options.cache.clone(),
+                ))
+                .is_ok(),
+            "a new context cell must be empty"
+        );
         Ok(Self {
-            context: ToolContext::with_cache(Arc::new(client), output_format, options.cache),
+            context,
+            output_format,
+            cache: options.cache,
             access_mode: options.access_mode,
         })
     }
 
+    /// Construct server state without accessing credentials.
+    ///
+    /// Credential loading is deferred until the first tool call so MCP initialization can
+    /// complete without waiting for an OS keyring prompt or Datadog network access.
+    pub fn deferred(output_format: OutputFormat, options: ServerOptions) -> Self {
+        Self {
+            context: OnceCell::new(),
+            output_format,
+            cache: options.cache,
+            access_mode: options.access_mode,
+        }
+    }
+
+    pub async fn initialize_tool_context(&self) -> Result<ToolContext> {
+        let context = self
+            .context
+            .get_or_try_init(|| async {
+                let config = tokio::task::spawn_blocking(DatadogConfig::from_env_or_file)
+                    .await
+                    .map_err(|error| anyhow::anyhow!("credential loader task failed: {error}"))??;
+                info!(site = %config.site, "Loaded Datadog configuration");
+                let client = DatadogClient::new(config)?;
+                Ok::<_, anyhow::Error>(ToolContext::with_cache(
+                    Arc::new(client),
+                    self.output_format,
+                    self.cache.clone(),
+                ))
+            })
+            .await?;
+        Ok(context.clone())
+    }
+
     pub fn tool_context(&self) -> ToolContext {
-        self.context.clone()
+        self.context
+            .get()
+            .expect("tool context must be initialized by the server tool wrapper")
+            .clone()
     }
 
     pub const fn access_mode(&self) -> AccessMode {
         self.access_mode
     }
 
-    pub fn site(&self) -> &str {
-        &self.context.client.config().site
+    pub const fn output_format(&self) -> OutputFormat {
+        self.output_format
+    }
+
+    pub fn is_context_initialized(&self) -> bool {
+        self.context.initialized()
     }
 
     pub async fn test_connection(&self) -> Result<()> {
-        self.context.client.validate_keys().await?;
+        self.initialize_tool_context()
+            .await?
+            .client
+            .validate_keys()
+            .await?;
         Ok(())
     }
 }
@@ -188,7 +256,16 @@ mod tests {
         let config = test_config();
         let state = ServerState::new(config, OutputFormat::Json).unwrap();
         assert_eq!(state.tool_context().output_format, OutputFormat::Json);
-        assert_eq!(state.site(), "datadoghq.com");
+        assert_eq!(state.tool_context().client.config().site, "datadoghq.com");
+        assert_eq!(state.access_mode(), AccessMode::ReadOnly);
+    }
+
+    #[test]
+    fn deferred_state_does_not_load_credentials_during_construction() {
+        let state = ServerState::deferred(OutputFormat::Json, ServerOptions::default());
+
+        assert!(state.context.get().is_none());
+        assert_eq!(state.output_format(), OutputFormat::Json);
         assert_eq!(state.access_mode(), AccessMode::ReadOnly);
     }
 

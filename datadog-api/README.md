@@ -10,7 +10,7 @@ Requires Rust 1.88 or newer.
 
 ## Features
 
-- **16 API modules** covering monitors, dashboards, metrics, logs, synthetics, events, infrastructure, downtimes, incidents, SLOs, security, notebooks, teams, users, and APM spans/services
+- **17 API modules** covering monitors, Slack channel configuration, dashboards, metrics, logs, synthetics, events, infrastructure, downtimes, incidents, SLOs, security, notebooks, teams, users, and APM spans/services
 - **Method-aware retry** for read-only requests with exponential jitter and Datadog rate-limit reset support; writes are not retried
 - **Rate limiting** with client-side token bucket
 - **Conditional requests** with ETag/If-Modified-Since support
@@ -124,6 +124,7 @@ let client = DatadogClient::new(config)?;
 let monitors = MonitorsApi::new(client.clone());
 let dashboards = DashboardsApi::new(client.clone());
 let slos = SLOsApi::new(client.clone());
+let slack = SlackApi::new(client.clone());
 
 // Metrics & Logs
 let metrics = MetricsApi::new(client.clone());

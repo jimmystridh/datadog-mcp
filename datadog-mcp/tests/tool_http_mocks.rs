@@ -43,5 +43,7 @@ mod platform;
 mod queries;
 #[path = "tool_http/resources.rs"]
 mod resources;
+#[path = "tool_http/slack.rs"]
+mod slack;
 #[path = "tool_http/validation.rs"]
 mod validation;

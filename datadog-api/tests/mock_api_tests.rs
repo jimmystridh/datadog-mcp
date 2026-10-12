@@ -21,5 +21,7 @@ mod platform;
 mod resilience;
 #[path = "mock_api/resources.rs"]
 mod resources;
+#[path = "mock_api/slack.rs"]
+mod slack;
 #[path = "mock_api/telemetry.rs"]
 mod telemetry;

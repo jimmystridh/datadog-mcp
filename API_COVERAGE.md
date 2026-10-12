@@ -16,12 +16,14 @@ Legend:
 | --- | --- | --- | --- |
 | Metrics | Read-only | Read-only | v2 timeseries query plus active list/metadata; no metric submission or metadata updates. |
 | Database Monitoring | Query metrics + sample search | Read-only | Scalar metrics ranked by query signature; activity/session and explain-plan samples from the databasequery index. API keys, no browser; sample API requires an unscoped app key. |
-| Monitors | CRUD + search | CRUD + search |  |
+| Monitors | CRUD + search + legacy group resolve | CRUD + search + legacy group resolve | Group resolution uses Datadog's undocumented, unversioned endpoint and is explicitly marked experimental. |
+| Slack integration | Channel CRUD | Channel CRUD + monitor notification audit | Workspace installation remains an OAuth UI operation; tools manage channels within an existing account and audit monitor handles. |
 | Dashboards | CRUD | CRUD |  |
 | Logs | Search-only | Search-only | No indexes/pipelines/archives. |
 | Events | Read + create (list/get/post) | Read + create (list/get/post) |  |
 | Infrastructure (hosts/tags) | Read-only | Read-only | Host list + tags only. |
 | Kubernetes deployments | No | Derived query tool | MCP tool uses a metrics query over k8s state. |
+| Kubernetes workload scaling | No public API | Read-only UI endpoint | Uses a local browser session through `cookie-scoop`; the undocumented endpoint has no compatibility guarantee. |
 | Downtimes | Partial (list/create/cancel) | Partial (list/create/cancel) | No update. |
 | Synthetics | Partial (list/get/locations/create/update/trigger/delete) | Partial | No results/history. |
 | Security Monitoring | Rules list-only | Rules list-only | No signals/findings. |
@@ -47,5 +49,5 @@ Legend:
 - Security (signals, findings, compliance, audit logs)
 - Admin/Org (orgs, roles/permissions, API/app keys, usage/billing)
 - Logs management (pipelines, processors, indexes, archives)
-- Automation (webhooks, integration configs, custom checks)
+- Automation (webhooks, non-Slack integration configs, custom checks)
 - Other (service catalog, SLA, workflows, case management, status pages)

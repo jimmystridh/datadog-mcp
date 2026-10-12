@@ -45,6 +45,8 @@ pub const VALID_MONITOR_TYPES: &[&str] = &[
 /// Valid dashboard layout types
 pub const VALID_DASHBOARD_LAYOUTS: &[&str] = &["ordered", "free"];
 
+const MAX_SLACK_NAME_LENGTH: usize = 200;
+
 /// Validate monitor type
 pub fn validate_monitor_type(monitor_type: &str) -> Result<(), ValidationError> {
     let normalized = monitor_type.to_lowercase();
@@ -84,6 +86,50 @@ pub fn validate_monitor_name(name: &str) -> Result<(), ValidationError> {
     } else {
         Ok(())
     }
+}
+
+/// Validate an exact monitor group target for the legacy resolve operation.
+pub fn validate_monitor_group_name(group_name: &str) -> Result<(), ValidationError> {
+    if group_name.trim().is_empty() {
+        return Err(ValidationError::EmptyField("monitor group name"));
+    }
+    if group_name.eq_ignore_ascii_case("ALL_GROUPS") {
+        return Err(ValidationError::Custom(
+            "ALL_GROUPS is not allowed; provide one exact group key from get_monitor".to_string(),
+        ));
+    }
+    if group_name.chars().any(char::is_control) {
+        return Err(ValidationError::Custom(
+            "monitor group name must not contain control characters".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+pub fn validate_slack_account_name(account_name: &str) -> Result<(), ValidationError> {
+    validate_slack_name("Slack account name", account_name)
+}
+
+pub fn validate_slack_channel_name(channel_name: &str) -> Result<(), ValidationError> {
+    validate_slack_name("Slack channel name", channel_name)
+}
+
+fn validate_slack_name(field: &'static str, value: &str) -> Result<(), ValidationError> {
+    if value.trim().is_empty() {
+        return Err(ValidationError::EmptyField(field));
+    }
+    if value.len() > MAX_SLACK_NAME_LENGTH {
+        return Err(ValidationError::Custom(format!(
+            "{field} is {} bytes; maximum is {MAX_SLACK_NAME_LENGTH}",
+            value.len()
+        )));
+    }
+    if value.chars().any(char::is_control) {
+        return Err(ValidationError::Custom(format!(
+            "{field} must not contain control characters"
+        )));
+    }
+    Ok(())
 }
 
 /// Validate dashboard title is not empty
@@ -158,6 +204,25 @@ mod tests {
         assert!(validate_monitor_name("My Monitor").is_ok());
         assert!(validate_monitor_name("  ").is_err());
         assert!(validate_monitor_name("").is_err());
+    }
+
+    #[test]
+    fn test_validate_monitor_group_name() {
+        assert!(validate_monitor_group_name("env:prod,database_instance:sql.example").is_ok());
+        assert!(validate_monitor_group_name("").is_err());
+        assert!(validate_monitor_group_name("  ").is_err());
+        assert!(validate_monitor_group_name("ALL_GROUPS").is_err());
+        assert!(validate_monitor_group_name("all_groups").is_err());
+        assert!(validate_monitor_group_name("env:prod\nteam:db").is_err());
+    }
+
+    #[test]
+    fn test_validate_slack_names() {
+        assert!(validate_slack_account_name("Spiris Production").is_ok());
+        assert!(validate_slack_channel_name("#operations-alerts").is_ok());
+        assert!(validate_slack_account_name(" ").is_err());
+        assert!(validate_slack_channel_name("#ops\nalerts").is_err());
+        assert!(validate_slack_channel_name(&"a".repeat(201)).is_err());
     }
 
     #[test]

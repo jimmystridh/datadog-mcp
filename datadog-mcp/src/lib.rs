@@ -69,6 +69,7 @@
 //! Build minimal: `cargo build --no-default-features`
 
 // Library exports for testing and potential library use
+pub mod browser_session;
 pub mod cache;
 pub mod ids;
 pub mod input_validation;

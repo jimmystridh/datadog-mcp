@@ -2,6 +2,7 @@
 //!
 //! Each module contains tools related to a specific Datadog feature area.
 
+mod autoscaling;
 mod cache_tools;
 mod dashboards;
 mod database_monitoring;
@@ -14,6 +15,7 @@ mod metrics;
 mod monitors;
 mod notebooks;
 mod security;
+mod slack;
 mod slos;
 mod synthetics;
 mod teams;
@@ -21,6 +23,7 @@ mod users;
 mod validation;
 
 // Re-export all tool functions
+pub use autoscaling::*;
 pub use cache_tools::*;
 pub use dashboards::*;
 pub use database_monitoring::*;
@@ -33,6 +36,7 @@ pub use metrics::*;
 pub use monitors::*;
 pub use notebooks::*;
 pub use security::*;
+pub use slack::*;
 pub use slos::*;
 pub use synthetics::*;
 pub use teams::*;

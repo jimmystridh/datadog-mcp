@@ -122,13 +122,19 @@ pub async fn render_tool_result(
 }
 
 fn error_result(error: anyhow::Error, context: &ToolContext) -> CallToolResult {
+    render_tool_error(error, context.output_format)
+}
+
+pub fn render_tool_error(
+    error: anyhow::Error,
+    output_format: crate::output::OutputFormat,
+) -> CallToolResult {
     error!(tool_error = %error, "Datadog MCP tool failed");
     let structured = json!({
         "status": "error",
         "error": error.to_string(),
     });
-    let text = context
-        .output_format
+    let text = output_format
         .format(&structured)
         .unwrap_or_else(|_| structured.to_string());
     let mut result = CallToolResult::structured_error(structured);

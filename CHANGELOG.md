@@ -21,12 +21,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Improved
 
+- Added Slack integration channel CRUD and a monitor notification audit that correlates configured
+  channels with static and dynamic `@slack-…` handles. Slack mutations use the existing
+  `--allow-write` safety gate; workspace OAuth installation remains outside the API surface.
 - Added `get_database_query_metrics` and `search_database_query_samples` using Datadog's documented
   Database Monitoring APIs, including ranked query metrics, active-session attributes, SQL statements,
   and explain-plan samples without browser authentication. Added region-aware app origins, bounded
   results, timestamp validation, full attribute preservation, and actionable DBM permission errors.
 - Made partial monitor updates omit unspecified fields and merge option patches with current
   options, preserving tags, notification settings, nested thresholds, and unknown options.
+
+- Added a read-only Kubernetes workload-scaling recommendations tool for Datadog's UI-only report,
+  with local browser-cookie authentication through `cookie-scoop`, explicit browser/profile
+  selection, bounded responses, redirect blocking, and an in-memory cookie cache.
+- Deferred credential loading and Datadog connectivity checks until the first tool call so MCP
+  initialization cannot be blocked by an OS keyring prompt or network timeout.
+- Added a macOS installation script that signs replacement binaries with a persistent identity,
+  allowing Keychain's **Always Allow** authorization to survive upgrades.
 - Reused RMCP's cached tool router and removed the redundant custom initialization handler.
 - Fixed active metric discovery by sending Datadog's required `from` timestamp and filtering metric names locally.
 - Accepted nullable metric units and empty scale factors returned by the Datadog timeseries API.
@@ -36,6 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed tests that did not compile without the optional TOON feature and added minimal-feature validation to CI.
 - Added MCP structured content, inline bounded results, cursor/offset pagination, and correct `isError` tool results.
 - Made `get_monitor` return group states, transition timestamps, active matching downtimes, and complete monitor options by default, with filters for narrower responses.
+- Added a write-gated, exact-group `resolve_monitor_group` tool around Datadog's legacy endpoint, with broad-target rejection and before/after verification.
 - Made dashboard and Synthetics updates preserve fields unknown to this client.
 - Made response caching opt-in, excluded sensitive domains, confined cache reads, and added retention/size limits.
 - Added method-aware retries with jitter, rate-limit reset handling, total deadlines, and no automatic write retries.

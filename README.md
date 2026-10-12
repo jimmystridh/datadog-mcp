@@ -11,7 +11,7 @@ A high-performance [Model Context Protocol](https://modelcontextprotocol.io/) (M
 
 ## Highlights
 
-- **41 MCP Tools** — Broad coverage of Datadog's core APIs: metrics, monitors, database monitoring, dashboards, logs, synthetics, incidents, and more
+- **49 MCP Tools** — Broad coverage of Datadog's core APIs: metrics, monitors, database monitoring, Slack, dashboards, logs, synthetics, incidents, and more
 - **TOON Output Format** — Optional [Token-Oriented Object Notation](https://github.com/toon-format/toon) reduces token usage by 30-60% compared to JSON
 - **Async & Non-blocking** — Built on Tokio for high throughput and responsiveness
 - **Safe Retry** — Read-only requests retry transient failures and honor Datadog rate-limit reset headers; writes are never retried automatically
@@ -30,6 +30,19 @@ git clone https://github.com/jimmystridh/datadog-mcp.git
 cd datadog-mcp
 cargo build --release
 ```
+
+On macOS, install the binary with a persistent code-signing identity so Keychain access remains
+trusted after upgrades:
+
+```bash
+security find-identity -v -p codesigning
+./scripts/install-macos.sh "Apple Development: Your Name (TEAMID)"
+```
+
+The first signed installation can require one Keychain approval. Choose **Always Allow**. Future
+installations signed with the same identity and identifier are recognized as the same application.
+If no signing identity is listed, create a Code Signing certificate in Keychain Access first.
+The identity can alternatively be supplied through `DATADOG_MCP_CODESIGN_IDENTITY`.
 
 ### 2. Configure
 
@@ -70,7 +83,14 @@ DD_PROFILE=default ./target/release/datadog-mcp --store-credentials
 | `DD_APP_KEY` | Yes | Datadog Application key |
 | `DD_SITE` | No | Datadog site (default: `datadoghq.com`) |
 | `DD_PROFILE` | No | Credential profile name (used for keyring entry; default `default`) |
+| `SWEET_COOKIE_CHROME_PROFILE` | No | Chrome profile directory used for Datadog UI-only tools, such as `Profile 1` |
+| `SWEET_COOKIE_EDGE_PROFILE` | No | Edge profile directory used for Datadog UI-only tools |
+| `SWEET_COOKIE_FIREFOX_PROFILE` | No | Firefox profile used for Datadog UI-only tools |
 | `RUST_LOG` | No | Log level: `error`, `warn`, `info`, `debug`, `trace` |
+
+MCP initialization does not access credentials or call Datadog. Credentials and the API client are
+initialized once, on the first Datadog tool call, so a Keychain prompt or slow network cannot cause
+the MCP startup handshake to time out.
 
 ### Credential Storage Order
 1. Environment variables (`DD_API_KEY`, `DD_APP_KEY`, `DD_SITE`)
@@ -150,11 +170,42 @@ Add to your project's `.mcp.json`:
 | `get_monitor` | Get monitor configuration, group states, status timestamps, and active matching downtimes |
 | `create_monitor` | Create new monitor |
 | `update_monitor` | Modify existing monitor |
+| `resolve_monitor_group` | Resolve one exact triggered group using Datadog's legacy endpoint |
 | `delete_monitor` | Remove monitor |
 
 `get_monitor` requests all group states and active matching downtimes by default. Use
 `group_states` to limit the returned states (`all`, `alert`, `warn`, or `no data`), pass an empty
 array to omit group details, or set `with_downtimes` to `false` to omit downtime details.
+
+`resolve_monitor_group` requires `--allow-write`, an exact group key copied from
+`get_monitor.data.state.groups`, and both monitor read and write permissions. It rejects
+Datadog's special `ALL_GROUPS` value, verifies the group before and after the write, and does not
+send a resolution when the group is already `OK`. The underlying Datadog endpoint is undocumented
+and unversioned, so the result identifies it as `legacy_undocumented` and callers should treat the
+tool as experimental. Resolving a group may emit a recovery notification.
+
+### Slack Notifications
+
+| Tool | Description |
+|------|-------------|
+| `get_slack_channels` | List channels configured for a Slack account/workspace |
+| `get_slack_channel` | Get one channel and its alert display settings |
+| `create_slack_channel` | Add a channel for monitor and event notifications |
+| `update_slack_channel` | Rename a configured channel or update its display settings |
+| `delete_slack_channel` | Remove a configured channel without changing monitor messages |
+| `audit_slack_monitor_notifications` | Correlate monitor `@slack-…` handles with configured channels |
+
+The Slack workspace must already be installed through Datadog's OAuth-based integration tile;
+the public API only manages channel mappings within that installation. Supply the Datadog Slack
+account name shown on the integration tile. Channel create, update, and delete operations require
+`--allow-write` and an application key whose owner has **Integrations Manage**. Reads and the audit
+remain available in the default read-only mode.
+
+The audit recognizes both `@slack-<channel>` and
+`@slack-<account>-<channel>`, reports configured-but-unused channels, preserves dynamic handles such
+as `@slack-{{owner.name}}` separately, and labels other handles as unmatched for the selected
+account rather than assuming they are invalid globally. Removing a channel does not rewrite any
+monitor message, so run the audit before deletion.
 
 ### Dashboards
 
@@ -211,6 +262,22 @@ are never written to the optional response cache.
 | `get_infrastructure` | Get host information |
 | `get_tags` | Retrieve host tags |
 | `get_kubernetes_deployments` | List K8s deployments |
+| `get_workload_scaling_recommendations` | Get Datadog's Kubernetes workload-scaling report using a local browser session |
+
+Datadog does not expose the workload-scaling report through its public API. The
+`get_workload_scaling_recommendations` tool therefore uses `cookie-scoop` to read an existing local
+Datadog browser session and calls the read-only, undocumented
+`/api/ui/orchestration/autoscaling/workloads/eligible` endpoint. Chrome is the default browser.
+Use `browser_profile` or the corresponding `SWEET_COOKIE_*_PROFILE` environment variable when the
+Datadog login is not in the browser's default profile. Chrome profile directory names such as
+`Default` or `Profile 1` are shown on `chrome://version`; filesystem paths are not accepted through
+the MCP tool.
+
+Cookies are held in memory for up to 15 minutes to avoid repeated OS credential prompts, never
+returned in MCP responses, logged, or written to the response cache. A cached session is refreshed
+automatically after an unauthorized response; set `refresh_browser_session` to refresh it sooner.
+The endpoint is not covered by Datadog's public compatibility guarantees and may change without
+notice.
 
 ### Synthetics Testing
 
@@ -394,6 +461,8 @@ async fn main() -> anyhow::Result<()> {
 | `403 Forbidden` | Check API/App key permissions in Datadog |
 | `Connection timeout` | Verify `DD_SITE` matches your Datadog region |
 | `Rate limited` | Automatic retry handles this; reduce request frequency if persistent |
+| `no Datadog browser cookies were found` | Sign in to the configured Datadog site and select the correct browser/profile |
+| Browser session unauthorized | Sign in again, then call the tool with `refresh_browser_session: true` |
 
 ## License
 

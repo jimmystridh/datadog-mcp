@@ -86,10 +86,6 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    // Load Datadog configuration
-    let config = datadog_api::config::DatadogConfig::from_env_or_file()?;
-    info!("Loaded Datadog configuration for site: {}", config.site);
-
     let cache = CacheStore::new(
         default_cache_dir(),
         args.cache_max_mib.saturating_mul(1024 * 1024),
@@ -110,9 +106,9 @@ async fn main() -> Result<()> {
         "Safety mode configured"
     );
 
-    // Initialize server state with output format
-    let state = ServerState::new_with_options(
-        config,
+    // Initialize server state without touching credentials or the network. Tool calls load the
+    // Datadog client lazily after the MCP handshake has completed.
+    let state = ServerState::deferred(
         args.format,
         ServerOptions {
             access_mode: if args.allow_write {
@@ -122,17 +118,8 @@ async fn main() -> Result<()> {
             },
             cache,
         },
-    )?;
+    );
     info!("Server state initialized");
-
-    // Test connection to Datadog
-    match state.test_connection().await {
-        Ok(_) => info!("Successfully connected to Datadog at: {}", state.site()),
-        Err(e) => info!(
-            "Could not verify connection to Datadog: {}. Server will start anyway, tools may fail.",
-            e
-        ),
-    }
 
     // Create MCP server with our Datadog tools
     let server = DatadogMcpServer::new(state);

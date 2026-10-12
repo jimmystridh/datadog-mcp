@@ -4,6 +4,14 @@ use crate::{
     Result,
 };
 use serde::Serialize;
+use std::collections::BTreeMap;
+
+const LEGACY_BULK_RESOLVE_ENDPOINT: &str = "/monitor/bulk_resolve";
+
+#[derive(Serialize)]
+struct ResolveMonitorGroupsRequest {
+    resolve: Vec<BTreeMap<String, String>>,
+}
 
 /// Optional detail filters for retrieving a monitor.
 #[derive(Debug, Default, Serialize)]
@@ -115,6 +123,25 @@ impl MonitorsApi {
             body["options"] = options;
         }
         self.client.put(&endpoint, &body).await
+    }
+
+    /// Resolves one exact monitor group through Datadog's legacy, undocumented endpoint.
+    ///
+    /// This operation is not part of Datadog's current public OpenAPI contract and may change
+    /// without notice. Prefer it only for groups whose triggering source has stopped reporting.
+    pub async fn resolve_monitor_group(
+        &self,
+        monitor_id: i64,
+        group_name: &str,
+    ) -> Result<Vec<Monitor>> {
+        let group = BTreeMap::from([(monitor_id.to_string(), group_name.to_string())]);
+        let request = ResolveMonitorGroupsRequest {
+            resolve: vec![group],
+        };
+
+        self.client
+            .post(LEGACY_BULK_RESOLVE_ENDPOINT, &request)
+            .await
     }
 
     pub async fn delete_monitor(&self, monitor_id: i64) -> Result<()> {

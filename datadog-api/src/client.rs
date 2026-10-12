@@ -491,6 +491,27 @@ impl DatadogClient {
         self.handle_pending_response(pending).await
     }
 
+    pub async fn patch<T: DeserializeOwned, B: serde::Serialize>(
+        &self,
+        endpoint: &str,
+        body: &B,
+    ) -> Result<T> {
+        let url = format!("{}{}", self.config.base_url(), endpoint);
+        let json_body = serde_json::to_string(body).map_err(Error::JsonError)?;
+        let pending = self
+            .send_with_policy("PATCH", endpoint, RetryClass::Never, || {
+                self.add_operation_headers(
+                    self.client
+                        .patch(&url)
+                        .body(json_body.clone())
+                        .header(header::CONTENT_TYPE, "application/json"),
+                    endpoint,
+                )
+            })
+            .await?;
+        self.handle_pending_response(pending).await
+    }
+
     pub async fn delete(&self, endpoint: &str) -> Result<()> {
         let url = format!("{}{}", self.config.base_url(), endpoint);
         let pending = self

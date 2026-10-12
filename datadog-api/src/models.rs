@@ -440,6 +440,33 @@ pub struct MonitorSearchNotification {
     pub name: Option<String>,
 }
 
+// Slack integration
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SlackIntegrationChannel {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display: Option<SlackIntegrationChannelDisplay>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, flatten)]
+    pub additional_properties: HashMap<String, JsonValue>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SlackIntegrationChannelDisplay {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mute_buttons: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notified: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snapshot: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tags: Option<bool>,
+    #[serde(default, flatten)]
+    pub additional_properties: HashMap<String, JsonValue>,
+}
+
 // Dashboards
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DashboardListResponse {

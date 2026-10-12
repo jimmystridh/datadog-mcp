@@ -47,6 +47,27 @@ println!("{:?}", config);  // Shows "[REDACTED]" for keys
 - Never included in URLs or query parameters
 - Headers are sanitized before logging
 
+### Browser-Session Authentication
+
+Datadog's Kubernetes workload-scaling report is available only through an undocumented UI
+endpoint. That read-only MCP tool uses `cookie-scoop` to extract cookies from one explicitly
+selected local browser and profile.
+
+- Browser cookies are sent only to the fixed HTTPS UI origin derived from `DD_SITE`.
+- Cross-origin and same-origin redirects are disabled so cookies cannot be forwarded elsewhere.
+- Cookie headers are marked sensitive, never logged or returned, and intermediate cookie values are
+  zeroized after the header is assembled.
+- Cookie headers are cached only in process memory for up to 15 minutes and zeroized on eviction or
+  process exit. Workload report responses are excluded from the file cache.
+- MCP callers may select a profile directory name such as `Default` or `Profile 1`, but cannot pass
+  an arbitrary filesystem path.
+- A `401` invalidates a cached cookie header and performs one fresh local extraction. A fresh `401`
+  is returned as an authentication error rather than repeatedly prompting the OS credential store.
+
+Reading encrypted Chromium cookies can invoke macOS Keychain, Linux keyring, or Windows DPAPI.
+Safari cookie access requires Full Disk Access on macOS. Only enable this tool on a trusted local
+machine and OS account.
+
 ## Logging and Caching
 
 ### Sanitized Logging
@@ -112,6 +133,7 @@ Only valid layouts: `ordered` or `free`
 | Unintended Datadog mutation | Read-only default; explicit `--allow-write` opt-in |
 | Cache path traversal | Canonical path confinement and file-size/type checks |
 | Oversized API responses | Streaming response-size enforcement before deserialization |
+| Browser-cookie exfiltration | Fixed Datadog origins, blocked redirects, sensitive headers, and no cookie output/cache |
 
 ### Out of Scope
 
@@ -144,6 +166,9 @@ cargo build --no-default-features
 | `DD_SITE` | Datadog site | No secret data |
 | `DD_PROFILE` | Keyring profile | No secret data |
 | `DATADOG_MCP_CACHE_DIR` | Cache location | Ensure secure permissions |
+| `SWEET_COOKIE_CHROME_PROFILE` | Chrome profile directory | Select only the profile containing the intended Datadog session |
+| `SWEET_COOKIE_EDGE_PROFILE` | Edge profile directory | Select only the profile containing the intended Datadog session |
+| `SWEET_COOKIE_FIREFOX_PROFILE` | Firefox profile | Select only the profile containing the intended Datadog session |
 
 ## Reporting Security Issues
 

@@ -18,6 +18,7 @@
 //! ├─────────────────────────────────────────────────────────────┤
 //! │  apis/              │  Domain-specific API modules         │
 //! │  ├─ monitors        │  Monitor CRUD operations             │
+//! │  ├─ slack           │  Slack channel configuration         │
 //! │  ├─ dashboards      │  Dashboard management                │
 //! │  ├─ metrics         │  Metrics queries                     │
 //! │  ├─ logs            │  Log search                          │

@@ -113,6 +113,16 @@ pub struct GetMonitorInput {
     pub with_downtimes: Option<bool>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ResolveMonitorGroupInput {
+    #[schemars(description = "Monitor ID")]
+    pub monitor_id: MonitorId,
+    #[schemars(
+        description = "Exact group key from get_monitor.data.state.groups; ALL_GROUPS is rejected"
+    )]
+    pub group_name: String,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
 pub enum MonitorGroupStateFilter {
     #[serde(rename = "all")]
@@ -184,6 +194,70 @@ pub struct SearchMonitorsInput {
     pub per_page: Option<i64>,
     #[schemars(description = "Sort order, e.g. 'name,asc' or 'status,desc'")]
     pub sort: Option<String>,
+}
+
+// ============================================================================
+// SLACK INTEGRATION TOOL INPUTS
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SlackAccountInput {
+    #[schemars(description = "Datadog Slack account/workspace configuration name")]
+    pub account_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SlackChannelInput {
+    #[schemars(description = "Datadog Slack account/workspace configuration name")]
+    pub account_name: String,
+    #[schemars(description = "Configured Slack channel name, with or without a leading #")]
+    pub channel_name: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+pub struct SlackChannelDisplayInput {
+    #[schemars(description = "Show the monitor notification message body")]
+    pub message: Option<bool>,
+    #[schemars(description = "Show interactive monitor mute buttons")]
+    pub mute_buttons: Option<bool>,
+    #[schemars(description = "Show notified recipient handles")]
+    pub notified: Option<bool>,
+    #[schemars(description = "Show the alert graph snapshot")]
+    pub snapshot: Option<bool>,
+    #[schemars(description = "Show tags and alert scope")]
+    pub tags: Option<bool>,
+}
+
+impl SlackChannelDisplayInput {
+    pub const fn is_empty(&self) -> bool {
+        self.message.is_none()
+            && self.mute_buttons.is_none()
+            && self.notified.is_none()
+            && self.snapshot.is_none()
+            && self.tags.is_none()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CreateSlackChannelInput {
+    #[schemars(description = "Datadog Slack account/workspace configuration name")]
+    pub account_name: String,
+    #[schemars(description = "Slack channel name, usually beginning with #")]
+    pub channel_name: String,
+    #[schemars(description = "Optional alert-message display settings for this channel")]
+    pub display: Option<SlackChannelDisplayInput>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct UpdateSlackChannelInput {
+    #[schemars(description = "Datadog Slack account/workspace configuration name")]
+    pub account_name: String,
+    #[schemars(description = "Current configured Slack channel name")]
+    pub channel_name: String,
+    #[schemars(description = "Optional replacement Slack channel name")]
+    pub new_channel_name: Option<String>,
+    #[schemars(description = "Optional alert-message display settings to update")]
+    pub display: Option<SlackChannelDisplayInput>,
 }
 
 // ============================================================================
@@ -398,6 +472,103 @@ pub struct GetKubernetesDeploymentsInput {
     pub namespace: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum BrowserCookieSourceInput {
+    Chrome,
+    Edge,
+    Firefox,
+    Safari,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkloadScalingSortBy {
+    ClusterId,
+    ClusterName,
+    EstimatedSavings,
+    CpuIdle,
+    MemoryUnused,
+    Name,
+    Namespace,
+    CpuUsage,
+    MemoryUsage,
+    CpuRequests,
+    MemoryRequests,
+    CpuLimits,
+    MemoryLimits,
+    IdleCostMonthly,
+    TotalCostMonthly,
+    IsReadyToAutoscale,
+    IsClusterReady,
+}
+
+impl WorkloadScalingSortBy {
+    pub const fn as_query_value(self) -> &'static str {
+        match self {
+            Self::ClusterId => "cluster_id",
+            Self::ClusterName => "cluster_name",
+            Self::EstimatedSavings => "estimated_savings",
+            Self::CpuIdle => "cpu_idle",
+            Self::MemoryUnused => "memory_unused",
+            Self::Name => "name",
+            Self::Namespace => "namespace",
+            Self::CpuUsage => "cpu_usage",
+            Self::MemoryUsage => "memory_usage",
+            Self::CpuRequests => "cpu_requests",
+            Self::MemoryRequests => "memory_requests",
+            Self::CpuLimits => "cpu_limits",
+            Self::MemoryLimits => "memory_limits",
+            Self::IdleCostMonthly => "idle_cost_monthly",
+            Self::TotalCostMonthly => "total_cost_monthly",
+            Self::IsReadyToAutoscale => "is_ready_to_autoscale",
+            Self::IsClusterReady => "is_cluster_ready",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum SortOrderInput {
+    Asc,
+    Desc,
+}
+
+impl SortOrderInput {
+    pub const fn as_query_value(self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct GetWorkloadScalingRecommendationsInput {
+    #[schemars(
+        description = "Optional Datadog workload query filter, for example kube_cluster_name:administration-stage-aks"
+    )]
+    pub query_filter: Option<String>,
+    #[schemars(description = "Zero-based page number; defaults to 0")]
+    pub page: Option<u32>,
+    #[schemars(description = "Results per page from 1 to 100; defaults to 25")]
+    pub page_size: Option<u32>,
+    #[schemars(description = "Sort field; defaults to estimated_savings")]
+    pub sort_by: Option<WorkloadScalingSortBy>,
+    #[schemars(description = "Sort order; defaults to desc")]
+    pub sort_order: Option<SortOrderInput>,
+    #[schemars(description = "Local browser containing the Datadog login; defaults to chrome")]
+    pub browser: Option<BrowserCookieSourceInput>,
+    #[schemars(
+        description = "Optional browser profile directory name such as Default or Profile 1; filesystem paths are rejected"
+    )]
+    pub browser_profile: Option<String>,
+    #[schemars(
+        description = "Refresh browser cookies instead of using the in-memory 15-minute cache; defaults to false"
+    )]
+    pub refresh_browser_session: Option<bool>,
+}
+
 // ============================================================================
 // UTILITIES TOOL INPUTS
 // ============================================================================
@@ -458,6 +629,61 @@ mod tests {
         assert_eq!(filters[0].as_query_value(), "alert");
         assert_eq!(filters[1].as_query_value(), "no data");
         assert_eq!(input.with_downtimes, Some(false));
+    }
+
+    #[test]
+    fn test_resolve_monitor_group_input_serialization() {
+        let input: ResolveMonitorGroupInput = serde_json::from_str(
+            r#"{"monitor_id":42,"group_name":"env:prod,database_instance:old"}"#,
+        )
+        .unwrap();
+
+        assert_eq!(input.monitor_id.0, 42);
+        assert_eq!(input.group_name, "env:prod,database_instance:old");
+    }
+
+    #[test]
+    fn slack_channel_inputs_preserve_partial_display_updates() {
+        let input: UpdateSlackChannelInput = serde_json::from_str(
+            r##"{
+                "account_name":"Spiris",
+                "channel_name":"#alerts",
+                "display":{"mute_buttons":false,"snapshot":true}
+            }"##,
+        )
+        .unwrap();
+
+        let display = input.display.unwrap();
+        assert_eq!(display.mute_buttons, Some(false));
+        assert_eq!(display.snapshot, Some(true));
+        assert_eq!(display.message, None);
+        assert!(!display.is_empty());
+    }
+
+    #[test]
+    fn workload_scaling_input_accepts_browser_profile_and_filters() {
+        let input: GetWorkloadScalingRecommendationsInput = serde_json::from_str(
+            r#"{
+                "query_filter":"kube_cluster_name:administration-stage-aks",
+                "page_size":10,
+                "sort_by":"cpu_idle",
+                "sort_order":"asc",
+                "browser":"chrome",
+                "browser_profile":"Profile 1",
+                "refresh_browser_session":true
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(input.page_size, Some(10));
+        assert_eq!(input.sort_by.unwrap().as_query_value(), "cpu_idle");
+        assert_eq!(input.sort_order.unwrap().as_query_value(), "asc");
+        assert!(matches!(
+            input.browser,
+            Some(BrowserCookieSourceInput::Chrome)
+        ));
+        assert_eq!(input.browser_profile.as_deref(), Some("Profile 1"));
+        assert_eq!(input.refresh_browser_session, Some(true));
     }
 
     #[test]
